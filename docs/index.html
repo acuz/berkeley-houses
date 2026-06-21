@@ -353,9 +353,8 @@ const INT_LABELS = { email:'Email', call:'Call', videoTour:'Video tour', inPerso
 const BERKELEY = [37.8715, -122.2730];
 
 // CORS proxy for fetching listing pages from the browser.
-// Default is a free public proxy (best-effort). For reliability/privacy,
-// deploy the Cloudflare Worker (see worker/listing-proxy.js) and put its URL here.
-const PROXY_URL = "https://api.allorigins.win/raw?url=";
+// This is the dedicated Cloudflare Worker (source: worker/listing-proxy.js).
+const PROXY_URL = "https://listing-proxy.angelo-cuzzola.workers.dev/?url=";
 
 // ================================================================
 // STATE
@@ -682,8 +681,11 @@ async function importFromUrl() {
   if (!url) { toast('Paste a listing URL first'); return; }
   const btn = $('fetch-btn'); const old = btn.textContent;
   btn.textContent = '…'; btn.disabled = true;
+  toast('Fetching listing…');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
   try {
-    const res = await fetch(PROXY_URL + encodeURIComponent(url));
+    const res = await fetch(PROXY_URL + encodeURIComponent(url), { signal: ctrl.signal });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const html = await res.text();
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -713,8 +715,10 @@ async function importFromUrl() {
     toast(found.length ? ('Imported: ' + [...new Set(found)].join(', ')) : 'No structured data found — fill manually');
   } catch (e) {
     console.warn('import failed', e);
-    toast('Fetch failed (site may block scraping) — fill manually');
+    const why = e.name === 'AbortError' ? 'timed out' : 'failed (' + (e.message || '') + ')';
+    toast('Fetch ' + why + ' — try /add-listing or set up the proxy worker');
   } finally {
+    clearTimeout(timer);
     btn.textContent = old; btn.disabled = false;
   }
 }
