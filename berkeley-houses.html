@@ -300,6 +300,7 @@
         <select id="i-type">
           <option value="email">📧 Email</option>
           <option value="call">📞 Call</option>
+          <option value="directMessage">💬 Direct message</option>
           <option value="videoTour">🎥 Video tour</option>
           <option value="inPerson">🚶 In-person visit</option>
           <option value="questionAsked">❓ Question asked</option>
@@ -358,8 +359,8 @@ const STATUSES = [
   { key:'dropped',       label:'Dropped',        color:'#64748b' },
 ];
 const STATUS_MAP = Object.fromEntries(STATUSES.map(s => [s.key, s]));
-const INT_ICONS = { email:'📧', call:'📞', videoTour:'🎥', inPerson:'🚶', questionAsked:'❓', other:'•' };
-const INT_LABELS = { email:'Email', call:'Call', videoTour:'Video tour', inPerson:'In-person visit', questionAsked:'Question asked', other:'Other' };
+const INT_ICONS = { email:'📧', call:'📞', directMessage:'💬', videoTour:'🎥', inPerson:'🚶', questionAsked:'❓', other:'•' };
+const INT_LABELS = { email:'Email', call:'Call', directMessage:'Direct message', videoTour:'Video tour', inPerson:'In-person visit', questionAsked:'Question asked', other:'Other' };
 const BERKELEY = [37.8715, -122.2730];
 const BANCROFT = [37.8722756, -122.2588768];  // Bancroft Library, UC Berkeley
 
