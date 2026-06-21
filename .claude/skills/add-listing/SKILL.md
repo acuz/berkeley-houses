@@ -66,10 +66,22 @@ The URL is in `$ARGUMENTS`. If empty, ask the user for the listing link.
 4. **Report** the new house id and address the script prints, and remind the
    user it's now visible in the app.
 
-## Credentials
+## Reading the listing
 
-The script needs the `berkeley-houses` service account key. It auto-detects
-`*berkeley-houses*adminsdk*.json` in the repo root, or reads the
-`GOOGLE_SERVICE_ACCOUNT` env var (JSON content). When running in the cloud /
-on the remote repo (no local PC), set `GOOGLE_SERVICE_ACCOUNT` as a secret —
-never commit the key. Requires `pip install firebase-admin`.
+`WebFetch` works for Craigslist / HotPads / property sites but is blocked
+(HTTP 403) by Zillow & Apartments.com. In a cloud session, prefer your own
+browsing to read those; if that's also blocked, ask the user to paste the
+listing text — then map it to the schema the same way.
+
+## Credentials (two backends, auto-selected)
+
+- **Local (service account):** the script auto-detects
+  `*berkeley-houses*adminsdk*.json` in the repo root (or `GOOGLE_SERVICE_ACCOUNT`
+  env with the JSON content). Requires `pip install firebase-admin`.
+- **Cloud (writer login):** when no service account is present, the script signs
+  in as a normal user via the Firestore REST API using `FIREBASE_EMAIL` +
+  `FIREBASE_PASSWORD` env vars (writer account, constrained by security rules).
+  No admin key needed; nothing to commit. This is the no-PC path.
+
+Geocoding is best-effort — if the network blocks Nominatim, the write still
+succeeds (just no map pin until the address is re-geocoded).

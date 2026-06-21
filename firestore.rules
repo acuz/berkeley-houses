@@ -10,7 +10,8 @@ service cloud.firestore {
     function isUs() {
       return request.auth != null && request.auth.uid in [
         "ewRt7NBEmtaCLKhAvtPuNmwPsC82",  // angelo.cuzzola@gmail.com
-        "1xdx8P6hoDTVE1udIHMUdSGXKwq1"   // irene.nicolino@gmail.com
+        "1xdx8P6hoDTVE1udIHMUdSGXKwq1",  // irene.nicolino@gmail.com
+        "IWH4pFgarWcwEyDh7b3zTYAfprI2"   // claude-writer@berkeley.app (cloud writer)
       ];
     }
 

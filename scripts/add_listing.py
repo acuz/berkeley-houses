@@ -1,35 +1,40 @@
 """
 Add a Berkeley house listing to Firestore (the `houses` collection).
 
-This is the write-side of the `add-listing` Claude skill: Claude scrapes a
-listing URL, maps the result to the house schema, then calls this script to
-persist it. Geocodes the address (Nominatim) so the map pin appears.
+Write-side of the `add-listing` skill. Works with EITHER backend:
+
+  A) Service account (local / admin) — full access, bypasses rules.
+     --key PATH | GOOGLE_SERVICE_ACCOUNT env (JSON content) |
+     GOOGLE_APPLICATION_CREDENTIALS | auto-detected *berkeley-houses*adminsdk*.json
+  B) Writer login (cloud / least-privilege) — signs in as a normal user and
+     writes via the Firestore REST API, constrained by the security rules.
+     Set FIREBASE_EMAIL + FIREBASE_PASSWORD (and optionally FIREBASE_API_KEY).
+
+A service account, if present, takes precedence; otherwise the writer login is
+used. Geocoding (Nominatim) is best-effort and non-fatal — a blocked network
+just means no map pin until the address is re-geocoded later.
 
 Usage:
-  python scripts/add_listing.py --json '{"title":"2BR Shattuck","url":"...","address":"2120 Shattuck Ave, Berkeley, CA","rent":3200,"beds":2,"baths":1}'
+  python scripts/add_listing.py --json '{"title":"...","url":"...","address":"..."}'
+  python scripts/add_listing.py --file listing.json
   echo '{...}' | python scripts/add_listing.py
 
-Credentials (first match wins):
-  --key PATH                          path to a service account JSON
-  GOOGLE_SERVICE_ACCOUNT env          service account JSON *content*
-  GOOGLE_APPLICATION_CREDENTIALS env  path to a service account JSON
-  ./*berkeley-houses*adminsdk*.json   auto-detected in the repo root
-
-Requires: pip install firebase-admin
+Requires: firebase-admin (only for the service-account backend).
 """
 
 import argparse
+import datetime
 import glob
 import json
 import os
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
-import firebase_admin
-from firebase_admin import credentials, firestore
+PROJECT_ID = os.environ.get("FIREBASE_PROJECT", "berkeley-houses")
+DEFAULT_WEB_API_KEY = "AIzaSyAM8OsVE69mk-7QcghltnAlpEZX0ole9tY"  # public web key
 
-# Schema fields with defaults (mirrors berkeley-houses.html).
 FIELDS = {
     "title": "", "url": "", "source": "", "address": "", "neighborhood": "",
     "rent": None, "beds": None, "baths": None, "sqft": None,
@@ -37,7 +42,6 @@ FIELDS = {
     "photo": "", "status": "interested", "pros": "", "cons": "", "notes": "",
 }
 NUMERIC = ("rent", "beds", "baths", "sqft")
-
 KNOWN_SOURCES = {
     "zillow.com": "Zillow", "craigslist.org": "Craigslist",
     "apartments.com": "Apartments.com", "trulia.com": "Trulia",
@@ -46,22 +50,7 @@ KNOWN_SOURCES = {
 }
 
 
-def get_credentials(key_arg):
-    if key_arg:
-        return credentials.Certificate(key_arg)
-    content = os.environ.get("GOOGLE_SERVICE_ACCOUNT")
-    if content:
-        return credentials.Certificate(json.loads(content))
-    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    if gac and os.path.exists(gac):
-        return credentials.Certificate(gac)
-    matches = glob.glob("*berkeley-houses*adminsdk*.json")
-    if matches:
-        return credentials.Certificate(matches[0])
-    sys.exit("No credentials. Pass --key PATH, set GOOGLE_SERVICE_ACCOUNT, "
-             "or place the service account JSON in the repo root.")
-
-
+# ---------- shared helpers ----------
 def source_from_url(url):
     if not url:
         return ""
@@ -70,6 +59,13 @@ def source_from_url(url):
         if host.endswith(domain):
             return name
     return host
+
+
+def coerce_number(val):
+    if val in ("", None):
+        return None
+    s = str(val).replace(",", "")
+    return float(s) if "." in s else int(float(s))
 
 
 def geocode(address):
@@ -83,17 +79,102 @@ def geocode(address):
         if arr:
             return float(arr[0]["lat"]), float(arr[0]["lon"])
     except Exception as e:  # noqa: BLE001
-        print(f"  geocode failed: {e}", file=sys.stderr)
+        print(f"  geocode skipped: {e}", file=sys.stderr)
     return None, None
 
 
-def coerce_number(val):
-    if val in ("", None):
-        return None
-    s = str(val).replace(",", "")
-    return float(s) if "." in s else int(float(s))
+def http_json(url, body=None, headers=None, method="POST"):
+    data = json.dumps(body).encode() if body is not None else None
+    h = {"Content-Type": "application/json"}
+    if headers:
+        h.update(headers)
+    req = urllib.request.Request(url, data=data, headers=h, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=25) as r:
+            return r.status, json.load(r)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.load(e)
+        except Exception:  # noqa: BLE001
+            return e.code, {"error": e.read().decode(errors="replace")[:300]}
 
 
+# ---------- backend A: service account ----------
+def try_service_account(key_arg):
+    if key_arg:
+        return key_arg, "key"
+    if os.environ.get("GOOGLE_SERVICE_ACCOUNT"):
+        return os.environ["GOOGLE_SERVICE_ACCOUNT"], "env"
+    gac = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if gac and os.path.exists(gac):
+        return gac, "key"
+    matches = glob.glob("*berkeley-houses*adminsdk*.json")
+    if matches:
+        return matches[0], "key"
+    return None, None
+
+
+def write_admin(cred_src, kind, doc, created_by):
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    cred = (credentials.Certificate(json.loads(cred_src)) if kind == "env"
+            else credentials.Certificate(cred_src))
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    doc = dict(doc)
+    doc["createdAt"] = firestore.SERVER_TIMESTAMP
+    doc["updatedAt"] = firestore.SERVER_TIMESTAMP
+    doc["createdBy"] = created_by
+    return db.collection("houses").add(doc)[1].id
+
+
+# ---------- backend B: writer login (REST) ----------
+def to_value(v):
+    if v is None:
+        return {"nullValue": None}
+    if isinstance(v, bool):
+        return {"booleanValue": v}
+    if isinstance(v, int):
+        return {"integerValue": str(v)}
+    if isinstance(v, float):
+        return {"doubleValue": v}
+    if isinstance(v, str):
+        return {"stringValue": v}
+    if isinstance(v, dict):
+        return {"mapValue": {"fields": {k: to_value(x) for k, x in v.items()}}}
+    if isinstance(v, list):
+        return {"arrayValue": {"values": [to_value(x) for x in v]}}
+    return {"stringValue": str(v)}
+
+
+def write_rest(doc, created_by):
+    api_key = os.environ.get("FIREBASE_API_KEY", DEFAULT_WEB_API_KEY)
+    email, pw = os.environ["FIREBASE_EMAIL"], os.environ["FIREBASE_PASSWORD"]
+
+    code, res = http_json(
+        f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}",
+        {"email": email, "password": pw, "returnSecureToken": True})
+    if code != 200:
+        raise SystemExit(f"Sign-in failed: {res.get('error', {}).get('message', res)}")
+    token = res["idToken"]
+
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    fields = {k: to_value(v) for k, v in doc.items()}
+    fields["createdAt"] = {"timestampValue": now}
+    fields["updatedAt"] = {"timestampValue": now}
+    fields["createdBy"] = {"stringValue": created_by}
+
+    url = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
+           f"/databases/(default)/documents/houses?key={api_key}")
+    code, res = http_json(url, {"fields": fields}, {"Authorization": "Bearer " + token})
+    if code != 200:
+        raise SystemExit(f"Firestore write failed (HTTP {code}): "
+                         f"{res.get('error', {}).get('status') or res}")
+    return res["name"].rsplit("/", 1)[-1]
+
+
+# ---------- main ----------
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", help="House fields as a JSON object")
@@ -107,7 +188,7 @@ def main():
     else:
         raw = args.json or sys.stdin.read()
     if not raw.strip():
-        sys.exit("No input. Provide --json '{...}' or pipe JSON via stdin.")
+        sys.exit("No input. Provide --json '{...}', --file PATH, or pipe JSON via stdin.")
     incoming = json.loads(raw)
 
     doc = {k: incoming.get(k, v) for k, v in FIELDS.items()}
@@ -123,22 +204,22 @@ def main():
         lat, lng = geocode(doc["address"])
     doc["lat"], doc["lng"] = lat, lng
     doc["ratings"] = incoming.get("ratings", {})
+    created_by = incoming.get("createdBy", "add-listing-skill")
 
-    cred = get_credentials(args.key)
-    if not firebase_admin._apps:
-        firebase_admin.initialize_app(cred)
-    db = firestore.client()
-
-    doc["createdAt"] = firestore.SERVER_TIMESTAMP
-    doc["updatedAt"] = firestore.SERVER_TIMESTAMP
-    doc["createdBy"] = incoming.get("createdBy", "add-listing-skill")
-
-    ref = db.collection("houses").add(doc)[1]
-    print(f"Added house {ref.id}: {doc['title'] or doc['address']}")
-    if lat:
-        print(f"  geocoded -> {lat}, {lng}")
+    cred_src, kind = try_service_account(args.key)
+    if cred_src:
+        doc_id = write_admin(cred_src, kind, doc, created_by)
+        backend = "service account"
+    elif os.environ.get("FIREBASE_EMAIL") and os.environ.get("FIREBASE_PASSWORD"):
+        doc_id = write_rest(doc, created_by)
+        backend = "writer login"
     else:
-        print("  (no coordinates - add a clearer address for the map pin)")
+        sys.exit("No credentials. Locally: place the service account JSON in the repo "
+                 "root. In the cloud: set FIREBASE_EMAIL + FIREBASE_PASSWORD secrets.")
+
+    print(f"Added house {doc_id}: {doc['title'] or doc['address']} (via {backend})")
+    print(f"  geocoded -> {lat}, {lng}" if lat else
+          "  (no coordinates - add a clearer address for the map pin)")
 
 
 if __name__ == "__main__":
