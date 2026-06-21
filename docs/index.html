@@ -92,6 +92,9 @@
     .hc-address { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 0.25rem; }
     .hc-commute { font-size: 0.78rem; color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
     .hc-commute .to { color: var(--muted); font-weight: 400; }
+    .video-wrap { position: relative; padding-top: 56.25%; border-radius: 0.6rem; overflow: hidden; background: #000; margin-top: 0.6rem; }
+    .video-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .video-player { width: 100%; border-radius: 0.6rem; margin-top: 0.6rem; background: #000; display: block; }
     .hc-specs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: auto; }
     .spec-chip { font-size: 0.74rem; background: #f1f5f9; border-radius: 0.4rem; padding: 0.15rem 0.5rem; color: var(--text); }
     .hc-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid var(--border); margin-top: 0.25rem; }
@@ -235,7 +238,12 @@
         <div class="form-group"><label>Address</label><input type="text" id="h-address" placeholder="2120 Shattuck Ave, Berkeley, CA"></div>
         <div class="form-group"><label>Neighborhood</label><input type="text" id="h-neighborhood" placeholder="Downtown / North Berkeley..."></div>
       </div>
+      <div class="two-col">
+        <div class="form-group"><label>Unit / Apt # <span style="color:var(--muted);font-weight:400">(a listing often covers many)</span></label><input type="text" id="h-unit" placeholder="e.g. Apt 305"></div>
+        <div class="form-group"><label>Video tour URL</label><input type="url" id="h-video" placeholder="YouTube, Vimeo, Matterport, .mp4…" oninput="renderVideoEmbed()"></div>
+      </div>
       <a id="hm-openlink" href="#" target="_blank" rel="noopener" class="hc-link hidden">↗ Open original listing</a>
+      <div id="video-embed"></div>
     </div>
 
     <div class="modal-section">
@@ -483,6 +491,7 @@ function renderHouses() {
     if (h.baths != null && h.baths !== '') specs.push(`${h.baths} ba`);
     if (h.sqft) specs.push(`${h.sqft} ft²`);
     if (h.neighborhood) specs.push(esc(h.neighborhood));
+    if (h.videoUrl) specs.push('🎥 Tour');
     const myR = (h.ratings && h.ratings[currentUser.uid]) || 0;
     const commuteHtml = (h.walkMin != null || h.bikeMin != null)
       ? `<div class="hc-commute">${h.walkMin != null ? `🚶 ${h.walkMin} min` : ''}`
@@ -496,7 +505,7 @@ function renderHouses() {
         ${h.rent ? `<span class="hc-rent">${fmtMoney(h.rent)}</span>` : ''}
       </div>
       <div class="hc-body">
-        <div class="hc-title">${esc(h.title || h.address || 'Untitled')}</div>
+        <div class="hc-title">${esc(h.title || h.address || 'Untitled')}${h.unit ? ` · ${esc(h.unit)}` : ''}</div>
         ${h.address ? `<div class="hc-address">📍 ${esc(h.address)}</div>` : ''}
         ${commuteHtml}
         <div class="hc-specs">${specs.map(s => `<span class="spec-chip">${s}</span>`).join('')}</div>
@@ -530,6 +539,9 @@ function openHouseModal(id) {
   $('h-url').value = h?.url || '';
   $('h-address').value = h?.address || '';
   $('h-neighborhood').value = h?.neighborhood || '';
+  $('h-unit').value = h?.unit || '';
+  $('h-video').value = h?.videoUrl || '';
+  renderVideoEmbed();
   $('h-rent').value = h?.rent ?? '';
   $('h-beds').value = h?.beds ?? '';
   $('h-baths').value = h?.baths ?? '';
@@ -561,7 +573,22 @@ function openHouseModal(id) {
   else { sec.classList.add('hidden'); }
   $('house-modal').classList.remove('hidden');
 }
-function closeHouseModal() { $('house-modal').classList.add('hidden'); editingHouse = null; }
+function closeHouseModal() { $('house-modal').classList.add('hidden'); editingHouse = null; $('video-embed').innerHTML = ''; }
+
+// ---- Video tour embedding ----
+function videoEmbed(url) {
+  url = (url || '').trim();
+  if (!url) return '';
+  const frame = src => `<div class="video-wrap"><iframe src="${src}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+  let m;
+  if ((m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/))) return frame(`https://www.youtube.com/embed/${m[1]}`);
+  if ((m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)))                                            return frame(`https://player.vimeo.com/video/${m[1]}`);
+  if ((m = url.match(/matterport\.com\/show\/\?m=([\w-]+)/)))                                       return frame(`https://my.matterport.com/show/?m=${m[1]}`);
+  if ((m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/)))                                     return frame(`https://drive.google.com/file/d/${m[1]}/preview`);
+  if (/\.(mp4|webm|ogg|mov)(\?|$)/i.test(url))                                                      return `<video class="video-player" controls preload="metadata" src="${esc(url)}"></video>`;
+  return `<a class="hc-link" href="${esc(url)}" target="_blank" rel="noopener">▶ Open video tour ↗</a>`;
+}
+function renderVideoEmbed() { $('video-embed').innerHTML = videoEmbed($('h-video').value); }
 function updateOpenLink() {
   const url = $('h-url').value.trim();
   const link = $('hm-openlink');
@@ -575,6 +602,8 @@ async function saveHouse() {
     source:       sourceFromUrl($('h-url').value.trim()),
     address:      $('h-address').value.trim(),
     neighborhood: $('h-neighborhood').value.trim(),
+    unit:         $('h-unit').value.trim(),
+    videoUrl:     $('h-video').value.trim(),
     rent:         numOrNull($('h-rent').value),
     beds:         numOrNull($('h-beds').value),
     baths:        numOrNull($('h-baths').value),

@@ -28,6 +28,10 @@ Keys and rules:
 - `title` (string): short label, e.g. "1BR on Delaware St"
 - `url` (string): the listing URL — always include
 - `address` (string): full street address incl. "Berkeley, CA"
+- `unit` (string): exact apartment/unit number if I mention one (a single listing
+  link often covers many units), e.g. "Apt 305"
+- `videoUrl` (string): a video-tour link if the page has one (YouTube / Vimeo /
+  Matterport / .mp4)
 - `neighborhood` (string)
 - `rent` (number): $/month, digits only (no $ or commas); if a range, use the low end
 - `beds` (number), `baths` (number), `sqft` (number)

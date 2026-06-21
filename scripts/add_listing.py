@@ -37,6 +37,7 @@ DEFAULT_WEB_API_KEY = "AIzaSyAM8OsVE69mk-7QcghltnAlpEZX0ole9tY"  # public web ke
 
 FIELDS = {
     "title": "", "url": "", "source": "", "address": "", "neighborhood": "",
+    "unit": "", "videoUrl": "",
     "rent": None, "beds": None, "baths": None, "sqft": None,
     "availableDate": "", "leaseTerm": "", "parking": "", "laundry": "", "pets": "",
     "photo": "", "status": "interested", "pros": "", "cons": "", "notes": "",
