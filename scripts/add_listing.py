@@ -68,9 +68,25 @@ def coerce_number(val):
     return float(s) if "." in s else int(float(s))
 
 
+BANCROFT = (37.8722756, -122.2588768)  # Bancroft Library, UC Berkeley
+
+
 def geocode(address):
+    q = address if "Berkeley" in address else address + ", Berkeley, CA"
+    # Photon first — reachable from cloud envs where Nominatim is blocked.
     try:
-        q = address if "Berkeley" in address else address + ", Berkeley, CA"
+        url = ("https://photon.komoot.io/api/?limit=1&lat=37.87&lon=-122.27&q="
+               + urllib.parse.quote(q))
+        req = urllib.request.Request(url, headers={"User-Agent": "berkeley-houses/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            feats = (json.load(r).get("features") or [])
+        if feats:
+            lon, lat = feats[0]["geometry"]["coordinates"][:2]
+            return float(lat), float(lon)
+    except Exception as e:  # noqa: BLE001
+        print(f"  photon geocode skipped: {e}", file=sys.stderr)
+    # Nominatim fallback.
+    try:
         url = ("https://nominatim.openstreetmap.org/search?format=json&limit=1&q="
                + urllib.parse.quote(q))
         req = urllib.request.Request(url, headers={"User-Agent": "berkeley-houses/1.0"})
@@ -79,8 +95,25 @@ def geocode(address):
         if arr:
             return float(arr[0]["lat"]), float(arr[0]["lon"])
     except Exception as e:  # noqa: BLE001
-        print(f"  geocode skipped: {e}", file=sys.stderr)
+        print(f"  nominatim geocode skipped: {e}", file=sys.stderr)
     return None, None
+
+
+def travel_minutes(lat, lng, costing):
+    try:
+        body = json.dumps({
+            "locations": [{"lat": lat, "lon": lng},
+                          {"lat": BANCROFT[0], "lon": BANCROFT[1]}],
+            "costing": costing,
+        }).encode()
+        req = urllib.request.Request("https://valhalla1.openstreetmap.de/route",
+                                     data=body, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            t = json.load(r).get("trip", {}).get("summary", {}).get("time")
+        return round(t / 60) if t else None
+    except Exception as e:  # noqa: BLE001
+        print(f"  route ({costing}) skipped: {e}", file=sys.stderr)
+        return None
 
 
 def http_json(url, body=None, headers=None, method="POST"):
@@ -203,6 +236,13 @@ def main():
     if (lat is None or lng is None) and doc["address"]:
         lat, lng = geocode(doc["address"])
     doc["lat"], doc["lng"] = lat, lng
+    if lat is not None and lng is not None:
+        wm = travel_minutes(lat, lng, "pedestrian")
+        bm = travel_minutes(lat, lng, "bicycle")
+        if wm is not None:
+            doc["walkMin"] = wm
+        if bm is not None:
+            doc["bikeMin"] = bm
     doc["ratings"] = incoming.get("ratings", {})
     created_by = incoming.get("createdBy", "add-listing-skill")
 

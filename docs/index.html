@@ -450,7 +450,7 @@ async function loadHouses() {
   renderFilters();
   renderHouses();
   if (mapReady) renderMarkers();
-  backfillCommute();
+  enrichHouses();
 }
 
 function renderFilters() {
@@ -817,6 +817,21 @@ async function backfillCommute() {
     Object.assign(h, upd);
     renderHouses();
   }
+}
+
+// Self-heal: houses added via the cloud may lack coords (Nominatim is blocked
+// there). Geocode them in the browser, then commute times back-fill from there.
+async function enrichHouses() {
+  let changed = false;
+  for (const h of houses.filter(x => x.address && (x.lat == null || x.lng == null))) {
+    const geo = await geocode(h.address);
+    if (geo) {
+      await housesCol().doc(h.id).update({ lat: geo.lat, lng: geo.lng }).catch(() => {});
+      h.lat = geo.lat; h.lng = geo.lng; changed = true;
+    }
+  }
+  if (changed) { renderHouses(); if (mapReady) renderMarkers(); }
+  await backfillCommute();
 }
 
 // ================================================================
