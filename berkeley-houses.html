@@ -90,6 +90,8 @@
     .hc-body { padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.45rem; flex: 1; }
     .hc-title { font-weight: 700; font-size: 0.95rem; line-height: 1.3; }
     .hc-address { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 0.25rem; }
+    .hc-commute { font-size: 0.78rem; color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+    .hc-commute .to { color: var(--muted); font-weight: 400; }
     .hc-specs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: auto; }
     .spec-chip { font-size: 0.74rem; background: #f1f5f9; border-radius: 0.4rem; padding: 0.15rem 0.5rem; color: var(--text); }
     .hc-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid var(--border); margin-top: 0.25rem; }
@@ -351,6 +353,7 @@ const STATUS_MAP = Object.fromEntries(STATUSES.map(s => [s.key, s]));
 const INT_ICONS = { email:'📧', call:'📞', videoTour:'🎥', inPerson:'🚶', questionAsked:'❓', other:'•' };
 const INT_LABELS = { email:'Email', call:'Call', videoTour:'Video tour', inPerson:'In-person visit', questionAsked:'Question asked', other:'Other' };
 const BERKELEY = [37.8715, -122.2730];
+const BANCROFT = [37.8722756, -122.2588768];  // Bancroft Library, UC Berkeley
 
 // CORS proxy for fetching listing pages from the browser.
 // This is the dedicated Cloudflare Worker (source: worker/listing-proxy.js).
@@ -447,6 +450,7 @@ async function loadHouses() {
   renderFilters();
   renderHouses();
   if (mapReady) renderMarkers();
+  backfillCommute();
 }
 
 function renderFilters() {
@@ -480,6 +484,12 @@ function renderHouses() {
     if (h.sqft) specs.push(`${h.sqft} ft²`);
     if (h.neighborhood) specs.push(esc(h.neighborhood));
     const myR = (h.ratings && h.ratings[currentUser.uid]) || 0;
+    const commuteHtml = (h.walkMin != null || h.bikeMin != null)
+      ? `<div class="hc-commute">${h.walkMin != null ? `🚶 ${h.walkMin} min` : ''}`
+        + `${(h.walkMin != null && h.bikeMin != null) ? ' · ' : ''}`
+        + `${h.bikeMin != null ? `🚴 ${h.bikeMin} min` : ''}`
+        + ` <span class="to">→ Bancroft</span></div>`
+      : '';
     return `<div class="house-card" onclick="openHouseModal('${h.id}')">
       ${photo}
         <span class="hc-status" style="background:${st.color}">${st.label}</span>
@@ -488,6 +498,7 @@ function renderHouses() {
       <div class="hc-body">
         <div class="hc-title">${esc(h.title || h.address || 'Untitled')}</div>
         ${h.address ? `<div class="hc-address">📍 ${esc(h.address)}</div>` : ''}
+        ${commuteHtml}
         <div class="hc-specs">${specs.map(s => `<span class="spec-chip">${s}</span>`).join('')}</div>
         <div class="hc-foot">
           <div class="hc-ratings">${starsHtml(myR)}</div>
@@ -594,6 +605,13 @@ async function saveHouse() {
     if (geo) { data.lat = geo.lat; data.lng = geo.lng; }
   } else if (existing) {
     data.lat = existing.lat ?? null; data.lng = existing.lng ?? null;
+  }
+
+  // travel times to Bancroft Library (walking + cycling)
+  if (data.lat != null && data.lng != null) {
+    const tt = await travelTimes(data.lat, data.lng);
+    data.walkMin = tt.walkMin;
+    data.bikeMin = tt.bikeMin;
   }
 
   try {
@@ -759,6 +777,46 @@ async function geocode(address) {
     if (arr && arr.length) return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
   } catch (e) { console.warn('geocode failed', e); }
   return null;
+}
+
+// ================================================================
+// TRAVEL TIME TO BANCROFT LIBRARY (Valhalla / OpenStreetMap — free, no key)
+// ================================================================
+async function routeMinutes(lat, lng, costing) {
+  try {
+    const res = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat, lon: lng }, { lat: BANCROFT[0], lon: BANCROFT[1] }],
+        costing
+      })
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const t = d?.trip?.summary?.time;
+    return t ? Math.round(t / 60) : null;
+  } catch (e) { console.warn('route failed', e); return null; }
+}
+
+async function travelTimes(lat, lng) {
+  const [walkMin, bikeMin] = await Promise.all([
+    routeMinutes(lat, lng, 'pedestrian'),
+    routeMinutes(lat, lng, 'bicycle')
+  ]);
+  return { walkMin, bikeMin };
+}
+
+// Lazily fill commute times for houses geocoded before this feature existed.
+async function backfillCommute() {
+  const todo = houses.filter(h => h.lat != null && h.lng != null && h.walkMin == null && h.bikeMin == null);
+  for (const h of todo) {
+    const tt = await travelTimes(h.lat, h.lng);
+    if (tt.walkMin == null && tt.bikeMin == null) continue;
+    const upd = { walkMin: tt.walkMin, bikeMin: tt.bikeMin };
+    await housesCol().doc(h.id).update(upd).catch(() => {});
+    Object.assign(h, upd);
+    renderHouses();
+  }
 }
 
 // ================================================================
