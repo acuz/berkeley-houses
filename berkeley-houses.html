@@ -95,6 +95,25 @@
     .video-wrap { position: relative; padding-top: 56.25%; border-radius: 0.6rem; overflow: hidden; background: #000; margin-top: 0.6rem; }
     .video-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
     .video-player { width: 100%; border-radius: 0.6rem; margin-top: 0.6rem; background: #000; display: block; }
+
+    /* ---- Calendar ---- */
+    .cal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .cal-month-title { font-size: 1.05rem; font-weight: 700; min-width: 150px; text-align: center; }
+    .cal-legend { display: flex; gap: 0.85rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .cal-dow { text-align: center; font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; padding: 0.3rem 0; }
+    .cal-day { background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; min-height: 94px; padding: 0.3rem; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+    .cal-day.other-month { background: transparent; border-color: transparent; }
+    .cal-day.today { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+    .cal-daynum { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+    .cal-day.today .cal-daynum { color: var(--primary); }
+    .cal-event { font-size: 0.66rem; line-height: 1.3; padding: 1px 4px; border-radius: 0.3rem; background: #f1f5f9; border-left: 3px solid var(--primary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cal-event:hover { filter: brightness(0.96); }
+    @media (max-width: 640px) {
+      .cal-day { min-height: 60px; padding: 0.2rem; }
+      .cal-event { font-size: 0.58rem; padding: 1px 2px; }
+      .cal-grid { gap: 2px; }
+    }
     .hc-specs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: auto; }
     .spec-chip { font-size: 0.74rem; background: #f1f5f9; border-radius: 0.4rem; padding: 0.15rem 0.5rem; color: var(--text); }
     .hc-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid var(--border); margin-top: 0.25rem; }
@@ -199,6 +218,7 @@
   <nav>
     <button class="nav-btn active" onclick="showView('list',this)">🗂 Houses</button>
     <button class="nav-btn" onclick="showView('map',this)">🗺 Map</button>
+    <button class="nav-btn" onclick="showView('calendar',this)">📅 Calendar</button>
   </nav>
 
   <main>
@@ -215,6 +235,22 @@
     <!-- MAP -->
     <div id="view-map" class="hidden">
       <div id="map"></div>
+    </div>
+
+    <!-- CALENDAR -->
+    <div id="view-calendar" class="hidden">
+      <div class="cal-toolbar">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <button class="btn-icon" onclick="changeMonth(-1)">&#8592;</button>
+          <div class="cal-month-title" id="cal-month-title"></div>
+          <button class="btn-icon" onclick="changeMonth(1)">&#8594;</button>
+          <button class="btn btn-secondary btn-sm" onclick="goToday()">Today</button>
+        </div>
+        <div class="cal-legend">
+          <span>📅 Appointment</span><span>🎥 Video call</span><span>🏠 Open house</span>
+        </div>
+      </div>
+      <div id="cal-grid" class="cal-grid"></div>
     </div>
   </main>
 </div>
@@ -316,6 +352,27 @@
       <button class="btn btn-secondary btn-sm" onclick="addInteraction()">+ Log interaction</button>
     </div>
 
+    <!-- Schedule / calendar (only for saved houses) -->
+    <div class="modal-section hidden" id="schedule-section">
+      <div class="modal-section-title">Schedule</div>
+      <div id="house-events" class="timeline"></div>
+      <div class="add-int-row">
+        <select id="ev-type">
+          <option value="appointment">📅 Appointment</option>
+          <option value="videoAppointment">🎥 Video appointment</option>
+          <option value="openHouse">🏠 Open house</option>
+        </select>
+        <input type="date" id="ev-date">
+      </div>
+      <div class="add-int-row">
+        <input type="time" id="ev-start" title="Start time">
+        <input type="time" id="ev-end" title="End time (optional)">
+      </div>
+      <div class="form-group" style="margin-top:0.6rem"><input type="url" id="ev-link" placeholder="Video link (optional, for video appointments)"></div>
+      <div class="form-group"><input type="text" id="ev-note" placeholder="Note (optional)"></div>
+      <button class="btn btn-secondary btn-sm" onclick="addEvent()">+ Add to calendar</button>
+    </div>
+
     <div class="modal-actions">
       <button id="h-delete-btn" class="btn btn-danger btn-sm" onclick="deleteHouse()" style="margin-right:auto">🗑 Delete</button>
       <button class="btn btn-secondary" onclick="closeHouseModal()">Close</button>
@@ -361,6 +418,11 @@ const STATUSES = [
 const STATUS_MAP = Object.fromEntries(STATUSES.map(s => [s.key, s]));
 const INT_ICONS = { email:'📧', call:'📞', directMessage:'💬', videoTour:'🎥', inPerson:'🚶', questionAsked:'❓', other:'•' };
 const INT_LABELS = { email:'Email', call:'Call', directMessage:'Direct message', videoTour:'Video tour', inPerson:'In-person visit', questionAsked:'Question asked', other:'Other' };
+const EVENT_TYPES = {
+  appointment:      { label:'Appointment',       icon:'📅', color:'#2563eb' },
+  videoAppointment: { label:'Video appointment', icon:'🎥', color:'#7c3aed' },
+  openHouse:        { label:'Open house',         icon:'🏠', color:'#16a34a' },
+};
 const BERKELEY = [37.8715, -122.2730];
 const BANCROFT = [37.8722756, -122.2588768];  // Bancroft Library, UC Berkeley
 
@@ -379,6 +441,8 @@ let activeFilter  = 'all';
 let map           = null;
 let markerLayer   = null;
 let mapReady      = false;
+let calYear       = new Date().getFullYear();
+let calMonth      = new Date().getMonth();   // 0-11
 
 function housesCol() { return db.collection('houses'); }
 function interactionsCol(id) { return db.collection('houses').doc(id).collection('interactions'); }
@@ -444,7 +508,9 @@ function showView(view, btn) {
   if (btn) btn.classList.add('active');
   $('view-list').classList.toggle('hidden', view !== 'list');
   $('view-map').classList.toggle('hidden', view !== 'map');
+  $('view-calendar').classList.toggle('hidden', view !== 'calendar');
   if (view === 'map') initMap();
+  if (view === 'calendar') renderCalendar();
 }
 
 // ================================================================
@@ -572,6 +638,10 @@ function openHouseModal(id) {
   const sec = $('interactions-section');
   if (id) { sec.classList.remove('hidden'); $('i-date').value = new Date().toISOString().split('T')[0]; loadInteractions(id); }
   else { sec.classList.add('hidden'); }
+  // schedule
+  const sch = $('schedule-section');
+  if (id) { sch.classList.remove('hidden'); $('ev-date').value = new Date().toISOString().split('T')[0]; renderHouseEvents(id); }
+  else { sch.classList.add('hidden'); }
   $('house-modal').classList.remove('hidden');
 }
 function closeHouseModal() { $('house-modal').classList.add('hidden'); editingHouse = null; $('video-embed').innerHTML = ''; }
@@ -590,6 +660,116 @@ function videoEmbed(url) {
   return `<a class="hc-link" href="${esc(url)}" target="_blank" rel="noopener">▶ Open video tour ↗</a>`;
 }
 function renderVideoEmbed() { $('video-embed').innerHTML = videoEmbed($('h-video').value); }
+
+// ================================================================
+// SCHEDULE / CALENDAR  (events stored as an array on each house doc)
+// ================================================================
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function newEventId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+function renderHouseEvents(houseId) {
+  const h = houses.find(x => x.id === houseId);
+  const el = $('house-events');
+  const evs = ((h && h.events) || []).slice()
+    .sort((a, b) => (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || '')));
+  if (!evs.length) { el.innerHTML = '<div class="tl-empty">No appointments or open houses yet.</div>'; return; }
+  el.innerHTML = evs.map(ev => {
+    const t = EVENT_TYPES[ev.type] || EVENT_TYPES.appointment;
+    const time = ev.startTime ? ev.startTime + (ev.endTime ? '–' + ev.endTime : '') : '';
+    return `<div class="tl-item">
+      <div class="tl-icon">${t.icon}</div>
+      <div class="tl-body">
+        <div class="tl-head"><span class="tl-type">${t.label}</span><span class="tl-date">${fmtDate(ev.date)}${time ? ' · ' + time : ''}</span></div>
+        ${ev.note ? `<div>${esc(ev.note)}</div>` : ''}
+        ${ev.link ? `<div><a class="hc-link" href="${esc(ev.link)}" target="_blank" rel="noopener">▶ Join link ↗</a></div>` : ''}
+        <button class="tl-del" onclick="deleteEvent('${ev.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function addEvent() {
+  if (!editingHouse) return;
+  const date = $('ev-date').value;
+  if (!date) { toast('Pick a date'); return; }
+  const ev = {
+    id: newEventId(),
+    type: $('ev-type').value,
+    date,
+    startTime: $('ev-start').value || '',
+    endTime: $('ev-end').value || '',
+    link: $('ev-link').value.trim(),
+    note: $('ev-note').value.trim(),
+  };
+  const h = houses.find(x => x.id === editingHouse);
+  const events = (h.events || []).concat(ev);
+  try {
+    await housesCol().doc(editingHouse).update({ events });
+    h.events = events;
+    $('ev-start').value = ''; $('ev-end').value = ''; $('ev-link').value = ''; $('ev-note').value = '';
+    toast('Added to calendar');
+    renderHouseEvents(editingHouse);
+    if (!$('view-calendar').classList.contains('hidden')) renderCalendar();
+  } catch (e) { toast('Failed: ' + e.message); }
+}
+
+async function deleteEvent(id) {
+  if (!editingHouse) return;
+  const h = houses.find(x => x.id === editingHouse);
+  const events = (h.events || []).filter(e => e.id !== id);
+  try {
+    await housesCol().doc(editingHouse).update({ events });
+    h.events = events;
+    renderHouseEvents(editingHouse);
+    if (!$('view-calendar').classList.contains('hidden')) renderCalendar();
+  } catch (e) { toast('Failed: ' + e.message); }
+}
+
+function allEvents() {
+  const out = [];
+  houses.forEach(h => (h.events || []).forEach(ev =>
+    out.push({ ...ev, houseId: h.id, houseTitle: h.title || h.address || 'Untitled' })));
+  return out;
+}
+
+function renderCalendar() {
+  $('cal-month-title').textContent = `${MONTHS[calMonth]} ${calYear}`;
+  const byDate = {};
+  allEvents().forEach(ev => { (byDate[ev.date] = byDate[ev.date] || []).push(ev); });
+
+  const startDow = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  let html = DOW.map(d => `<div class="cal-dow">${d}</div>`).join('');
+  html += cells.map(d => {
+    if (d === null) return `<div class="cal-day other-month"></div>`;
+    const ds = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const evs = (byDate[ds] || []).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    const chips = evs.map(ev => {
+      const t = EVENT_TYPES[ev.type] || EVENT_TYPES.appointment;
+      const time = ev.startTime ? ev.startTime + ' ' : '';
+      return `<div class="cal-event" style="border-left-color:${t.color}" title="${esc(ev.houseTitle)}${ev.note ? ' — ' + esc(ev.note) : ''}" onclick="openHouseModal('${ev.houseId}')">${t.icon} ${esc(time)}${esc(ev.houseTitle)}</div>`;
+    }).join('');
+    return `<div class="cal-day${ds === todayStr ? ' today' : ''}"><div class="cal-daynum">${d}</div>${chips}</div>`;
+  }).join('');
+  $('cal-grid').innerHTML = html;
+}
+
+function changeMonth(delta) {
+  calMonth += delta;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+}
+function goToday() { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); renderCalendar(); }
 function updateOpenLink() {
   const url = $('h-url').value.trim();
   const link = $('hm-openlink');
