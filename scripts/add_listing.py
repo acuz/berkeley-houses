@@ -133,6 +133,21 @@ def http_json(url, body=None, headers=None, method="POST"):
             return e.code, {"error": e.read().decode(errors="replace")[:300]}
 
 
+# Fields worth writing on an UPDATE (skip blanks so a partial re-scrape never
+# wipes existing data; never touch ratings/events here).
+def meaningful(doc):
+    out = {}
+    for k, v in doc.items():
+        if k in ("ratings", "events"):
+            continue
+        if v in ("", None):
+            continue
+        if isinstance(v, dict) and not v:
+            continue
+        out[k] = v
+    return out
+
+
 # ---------- backend A: service account ----------
 def try_service_account(key_arg):
     if key_arg:
@@ -157,10 +172,18 @@ def write_admin(cred_src, kind, doc, created_by):
         firebase_admin.initialize_app(cred)
     db = firestore.client()
     doc = dict(doc)
+    url = doc.get("url")
+    if url:  # dedup: update the existing listing with this URL instead of duplicating
+        existing = list(db.collection("houses").where("url", "==", url).limit(1).stream())
+        if existing:
+            upd = meaningful(doc)
+            upd["updatedAt"] = firestore.SERVER_TIMESTAMP
+            existing[0].reference.update(upd)
+            return existing[0].id, "updated"
     doc["createdAt"] = firestore.SERVER_TIMESTAMP
     doc["updatedAt"] = firestore.SERVER_TIMESTAMP
     doc["createdBy"] = created_by
-    return db.collection("houses").add(doc)[1].id
+    return db.collection("houses").add(doc)[1].id, "added"
 
 
 # ---------- backend B: writer login (REST) ----------
@@ -192,20 +215,44 @@ def write_rest(doc, created_by):
     if code != 200:
         raise SystemExit(f"Sign-in failed: {res.get('error', {}).get('message', res)}")
     token = res["idToken"]
-
+    auth = {"Authorization": "Bearer " + token}
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    base = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
+
+    # dedup: find an existing listing with this URL
+    existing_name = None
+    if doc.get("url"):
+        q = {"structuredQuery": {
+            "from": [{"collectionId": "houses"}],
+            "where": {"fieldFilter": {"field": {"fieldPath": "url"},
+                                      "op": "EQUAL", "value": {"stringValue": doc["url"]}}},
+            "limit": 1}}
+        code, res = http_json(f"{base}:runQuery?key={api_key}", q, auth)
+        if code == 200:
+            for row in res:
+                if row.get("document"):
+                    existing_name = row["document"]["name"]
+                    break
+
+    if existing_name:  # update only non-blank fields; preserve createdAt/ratings/events
+        upd = meaningful(doc)
+        fields = {k: to_value(v) for k, v in upd.items()}
+        fields["updatedAt"] = {"timestampValue": now}
+        mask = "&".join(f"updateMask.fieldPaths={k}" for k in fields)
+        code, res = http_json(f"https://firestore.googleapis.com/v1/{existing_name}?key={api_key}&{mask}",
+                              {"fields": fields}, auth, method="PATCH")
+        if code != 200:
+            raise SystemExit(f"Firestore update failed (HTTP {code}): {res.get('error', {}).get('status') or res}")
+        return existing_name.rsplit("/", 1)[-1], "updated"
+
     fields = {k: to_value(v) for k, v in doc.items()}
     fields["createdAt"] = {"timestampValue": now}
     fields["updatedAt"] = {"timestampValue": now}
     fields["createdBy"] = {"stringValue": created_by}
-
-    url = (f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}"
-           f"/databases/(default)/documents/houses?key={api_key}")
-    code, res = http_json(url, {"fields": fields}, {"Authorization": "Bearer " + token})
+    code, res = http_json(f"{base}/houses?key={api_key}", {"fields": fields}, auth)
     if code != 200:
-        raise SystemExit(f"Firestore write failed (HTTP {code}): "
-                         f"{res.get('error', {}).get('status') or res}")
-    return res["name"].rsplit("/", 1)[-1]
+        raise SystemExit(f"Firestore write failed (HTTP {code}): {res.get('error', {}).get('status') or res}")
+    return res["name"].rsplit("/", 1)[-1], "added"
 
 
 # ---------- main ----------
@@ -249,16 +296,17 @@ def main():
 
     cred_src, kind = try_service_account(args.key)
     if cred_src:
-        doc_id = write_admin(cred_src, kind, doc, created_by)
+        doc_id, action = write_admin(cred_src, kind, doc, created_by)
         backend = "service account"
     elif os.environ.get("FIREBASE_EMAIL") and os.environ.get("FIREBASE_PASSWORD"):
-        doc_id = write_rest(doc, created_by)
+        doc_id, action = write_rest(doc, created_by)
         backend = "writer login"
     else:
         sys.exit("No credentials. Locally: place the service account JSON in the repo "
                  "root. In the cloud: set FIREBASE_EMAIL + FIREBASE_PASSWORD secrets.")
 
-    print(f"Added house {doc_id}: {doc['title'] or doc['address']} (via {backend})")
+    verb = "Updated" if action == "updated" else "Added"
+    print(f"{verb} house {doc_id}: {doc['title'] or doc['address']} (via {backend})")
     print(f"  geocoded -> {lat}, {lng}" if lat else
           "  (no coordinates - add a clearer address for the map pin)")
 

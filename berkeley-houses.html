@@ -376,7 +376,7 @@
     <div class="modal-actions">
       <button id="h-delete-btn" class="btn btn-danger btn-sm" onclick="deleteHouse()" style="margin-right:auto">🗑 Delete</button>
       <button class="btn btn-secondary" onclick="closeHouseModal()">Close</button>
-      <button class="btn btn-primary" onclick="saveHouse()">Save</button>
+      <button id="save-btn" class="btn btn-primary" onclick="saveHouse()">Save</button>
     </div>
   </div>
 </div>
@@ -776,7 +776,9 @@ function updateOpenLink() {
   if (url) { link.href = url; link.classList.remove('hidden'); } else { link.classList.add('hidden'); }
 }
 
+let savingHouse = false;
 async function saveHouse() {
+  if (savingHouse) return;
   const data = {
     title:        $('h-title').value.trim(),
     url:          $('h-url').value.trim(),
@@ -809,22 +811,25 @@ async function saveHouse() {
   if (curRating) ratings[currentUser.uid] = curRating; else delete ratings[currentUser.uid];
   data.ratings = ratings;
 
-  // geocode if address present and (new, or address changed)
-  if (data.address && (!existing || existing.address !== data.address || existing.lat == null)) {
-    const geo = await geocode(data.address);
-    if (geo) { data.lat = geo.lat; data.lng = geo.lng; }
-  } else if (existing) {
-    data.lat = existing.lat ?? null; data.lng = existing.lng ?? null;
-  }
-
-  // travel times to Bancroft Library (walking + cycling)
-  if (data.lat != null && data.lng != null) {
-    const tt = await travelTimes(data.lat, data.lng);
-    data.walkMin = tt.walkMin;
-    data.bikeMin = tt.bikeMin;
-  }
-
+  savingHouse = true;
+  const saveBtn = $('save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
   try {
+    // geocode if address present and (new, or address changed)
+    if (data.address && (!existing || existing.address !== data.address || existing.lat == null)) {
+      const geo = await geocode(data.address);
+      if (geo) { data.lat = geo.lat; data.lng = geo.lng; }
+    } else if (existing) {
+      data.lat = existing.lat ?? null; data.lng = existing.lng ?? null;
+    }
+
+    // travel times to Bancroft Library (walking + cycling)
+    if (data.lat != null && data.lng != null) {
+      const tt = await travelTimes(data.lat, data.lng);
+      data.walkMin = tt.walkMin;
+      data.bikeMin = tt.bikeMin;
+    }
+
     if (editingHouse) {
       await housesCol().doc(editingHouse).update(data);
     } else {
@@ -837,6 +842,9 @@ async function saveHouse() {
     await loadHouses();
   } catch (e) {
     console.error(e); toast('Save failed: ' + e.message);
+  } finally {
+    savingHouse = false;
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
   }
 }
 function numOrNull(v) { return v === '' || v == null ? null : Number(v); }
