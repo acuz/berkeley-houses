@@ -1,0 +1,44 @@
+name: Daily Houses Backup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 03:00 UTC nightly
+  workflow_dispatch:        # Manual run from the Actions tab
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # needed to push to the backups branch
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install firebase-admin
+
+      - name: Run backup
+        run: |
+          DATE=$(date -u +%Y-%m-%d)
+          python scripts/backup_houses.py
+          echo "DATE=$DATE" >> $GITHUB_ENV
+        env:
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
+          BACKUP_PATH: houses-backup.json
+
+      - name: Commit backup to branch 'backups'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin backups 2>/dev/null && git checkout backups || git checkout --orphan backups
+          mkdir -p backups
+          cp houses-backup.json backups/houses-backup-${{ env.DATE }}.json
+          git add backups/houses-backup-${{ env.DATE }}.json
+          git diff --cached --quiet || git commit -m "Backup ${{ env.DATE }}"
+          git push origin backups

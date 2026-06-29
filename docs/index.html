@@ -1,0 +1,1088 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Berkeley House Search</title>
+
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+  <!-- Leaflet (map) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <style>
+    :root {
+      --primary: #2563eb;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #1e293b;
+      --muted: #64748b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .hidden { display: none !important; }
+
+    /* ---- Login ---- */
+    .auth-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; background: linear-gradient(135deg, #0f2a4a 0%, #2563eb 100%); }
+    .auth-card { background: white; padding: 2.5rem; border-radius: 1rem; width: 100%; max-width: 380px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
+    .auth-card h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .auth-card p  { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.75rem; }
+    .auth-error   { color: #dc2626; font-size: 0.85rem; margin-top: 0.75rem; text-align: center; min-height: 1.2rem; }
+
+    /* ---- Forms ---- */
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.375rem; }
+    .form-group input, .form-group select, .form-group textarea {
+      width: 100%; padding: 0.6rem 0.875rem; border: 1px solid var(--border);
+      border-radius: 0.5rem; font-size: 0.9rem; transition: border-color 0.2s;
+      background: white; font-family: inherit;
+    }
+    .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--primary); }
+
+    /* ---- Buttons ---- */
+    .btn { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.6rem 1.25rem; border-radius: 0.5rem; font-size: 0.9rem; font-weight: 500; cursor: pointer; border: none; transition: all 0.15s; font-family: inherit; }
+    .btn-primary   { background: var(--primary); color: white; }
+    .btn-primary:hover  { background: #1d4ed8; }
+    .btn-full      { width: 100%; justify-content: center; }
+    .btn-secondary { background: #f1f5f9; color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-danger    { background: #fee2e2; color: #dc2626; }
+    .btn-danger:hover { background: #fecaca; }
+    .btn-sm        { padding: 0.4rem 0.875rem; font-size: 0.82rem; }
+    .btn-icon { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--border); background: white; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1rem; transition: background 0.15s; }
+    .btn-icon:hover { background: var(--bg); }
+
+    /* ---- App shell ---- */
+    header { background: white; border-bottom: 1px solid var(--border); padding: 0 1.5rem; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    header h1 { font-size: 1.05rem; font-weight: 700; }
+    .user-badge { font-size: 0.78rem; padding: 0.25rem 0.6rem; border-radius: 9999px; background: #dbeafe; color: #1e40af; font-weight: 500; }
+    nav { background: white; border-bottom: 1px solid var(--border); padding: 0 1.5rem; display: flex; }
+    .nav-btn { padding: 0.75rem 1.1rem; font-size: 0.875rem; font-weight: 500; color: var(--muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.15s; margin-bottom: -1px; font-family: inherit; }
+    .nav-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .nav-btn:hover:not(.active) { color: var(--text); }
+    main { padding: 1.5rem; max-width: 1400px; margin: 0 auto; }
+
+    /* ---- Toolbar ---- */
+    .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem; }
+    .toolbar h2 { font-size: 1.1rem; font-weight: 700; }
+    .filters { display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem; }
+    .filter-chip { padding: 0.3rem 0.8rem; border-radius: 9999px; border: 1px solid var(--border); background: white; font-size: 0.8rem; font-weight: 500; cursor: pointer; color: var(--muted); transition: all 0.15s; font-family: inherit; display: inline-flex; align-items: center; gap: 0.35rem; }
+    .filter-chip:hover { border-color: var(--primary); }
+    .filter-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+    .filter-chip .count { font-size: 0.7rem; opacity: 0.8; }
+    .sort-select { margin-left: auto; padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 0.5rem; font-size: 0.82rem; font-family: inherit; background: white; }
+
+    /* ---- House cards ---- */
+    .house-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+    .house-card { background: var(--card); border: 1px solid var(--border); border-radius: 0.75rem; overflow: hidden; cursor: pointer; transition: box-shadow 0.15s, transform 0.1s; display: flex; flex-direction: column; }
+    .house-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.1); transform: translateY(-2px); }
+    .hc-photo { height: 160px; background: #e2e8f0 center/cover no-repeat; position: relative; flex-shrink: 0; }
+    .hc-photo.placeholder { display: flex; align-items: center; justify-content: center; font-size: 2.5rem; color: #cbd5e1; background: linear-gradient(135deg,#f1f5f9,#e2e8f0); }
+    .hc-status { position: absolute; top: 0.6rem; left: 0.6rem; font-size: 0.7rem; font-weight: 700; color: white; padding: 0.22rem 0.6rem; border-radius: 9999px; box-shadow: 0 1px 3px rgba(0,0,0,0.25); }
+    .hc-rent { position: absolute; bottom: 0.6rem; right: 0.6rem; font-size: 0.95rem; font-weight: 800; color: white; background: rgba(15,23,42,0.78); padding: 0.2rem 0.6rem; border-radius: 0.5rem; }
+    .hc-body { padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.45rem; flex: 1; }
+    .hc-title { font-weight: 700; font-size: 0.95rem; line-height: 1.3; }
+    .hc-address { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 0.25rem; }
+    .hc-commute { font-size: 0.78rem; color: var(--text); font-weight: 600; display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+    .hc-commute .to { color: var(--muted); font-weight: 400; }
+    .video-wrap { position: relative; padding-top: 56.25%; border-radius: 0.6rem; overflow: hidden; background: #000; margin-top: 0.6rem; }
+    .video-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .video-player { width: 100%; border-radius: 0.6rem; margin-top: 0.6rem; background: #000; display: block; }
+
+    /* ---- Calendar ---- */
+    .cal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
+    .cal-month-title { font-size: 1.05rem; font-weight: 700; min-width: 150px; text-align: center; }
+    .cal-legend { display: flex; gap: 0.85rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+    .cal-dow { text-align: center; font-size: 0.72rem; font-weight: 700; color: var(--muted); text-transform: uppercase; padding: 0.3rem 0; }
+    .cal-day { background: var(--card); border: 1px solid var(--border); border-radius: 0.5rem; min-height: 94px; padding: 0.3rem; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+    .cal-day.other-month { background: transparent; border-color: transparent; }
+    .cal-day.today { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary) inset; }
+    .cal-daynum { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+    .cal-day.today .cal-daynum { color: var(--primary); }
+    .cal-event { font-size: 0.66rem; line-height: 1.3; padding: 1px 4px; border-radius: 0.3rem; background: #f1f5f9; border-left: 3px solid var(--primary); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cal-event:hover { filter: brightness(0.96); }
+    @media (max-width: 640px) {
+      .cal-day { min-height: 60px; padding: 0.2rem; }
+      .cal-event { font-size: 0.58rem; padding: 1px 2px; }
+      .cal-grid { gap: 2px; }
+    }
+    .hc-specs { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: auto; }
+    .spec-chip { font-size: 0.74rem; background: #f1f5f9; border-radius: 0.4rem; padding: 0.15rem 0.5rem; color: var(--text); }
+    .hc-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 0.5rem; border-top: 1px solid var(--border); margin-top: 0.25rem; }
+    .hc-ratings { display: flex; gap: 0.6rem; font-size: 0.72rem; color: var(--muted); align-items: center; }
+    .hc-link { font-size: 0.74rem; color: var(--primary); text-decoration: none; font-weight: 600; }
+    .hc-link:hover { text-decoration: underline; }
+    .stars { color: #f59e0b; letter-spacing: 1px; }
+    .stars .empty { color: #cbd5e1; }
+    .empty-state { text-align: center; padding: 4rem 1rem; color: var(--muted); }
+    .empty-state .big { font-size: 3rem; margin-bottom: 0.5rem; }
+
+    /* ---- Map ---- */
+    #map { height: calc(100vh - 180px); min-height: 420px; border-radius: 0.75rem; border: 1px solid var(--border); }
+    .map-pin { width: 22px; height: 22px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); border: 2px solid white; box-shadow: 0 2px 5px rgba(0,0,0,0.4); }
+    .leaflet-popup-content { font-family: inherit; font-size: 0.85rem; }
+    .popup-title { font-weight: 700; margin-bottom: 0.2rem; }
+    .popup-rent { color: var(--primary); font-weight: 700; }
+    .popup-btn { display: inline-block; margin-top: 0.4rem; color: var(--primary); cursor: pointer; font-weight: 600; }
+
+    /* ---- Modal ---- */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+    .modal-card { background: white; border-radius: 1rem; width: 100%; max-width: 640px; max-height: 92vh; overflow-y: auto; padding: 1.75rem; }
+    .modal-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 1.25rem; display: flex; align-items: center; gap: 0.5rem; }
+    .modal-section { margin-bottom: 1.25rem; }
+    .modal-section-title { font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin-bottom: 0.75rem; padding-bottom: 0.375rem; border-bottom: 1px solid var(--border); }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+    .modal-actions { display: flex; gap: 0.75rem; justify-content: flex-end; margin-top: 1.5rem; flex-wrap: wrap; }
+
+    /* Star picker */
+    .star-picker { display: flex; gap: 0.15rem; font-size: 1.5rem; color: #cbd5e1; cursor: pointer; }
+    .star-picker .on { color: #f59e0b; }
+    .rating-row { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+    .rating-block { display: flex; flex-direction: column; gap: 0.2rem; }
+    .rating-block .lbl { font-size: 0.78rem; color: var(--muted); font-weight: 500; }
+    .other-rating { font-size: 0.85rem; }
+
+    /* Interactions timeline */
+    .timeline { display: flex; flex-direction: column; gap: 0.6rem; }
+    .tl-item { display: flex; gap: 0.7rem; padding: 0.6rem 0.75rem; background: #f8fafc; border: 1px solid var(--border); border-radius: 0.6rem; }
+    .tl-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .tl-body { flex: 1; font-size: 0.84rem; }
+    .tl-head { display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+    .tl-type { font-weight: 700; }
+    .tl-date { color: var(--muted); font-size: 0.78rem; }
+    .tl-meta { color: var(--muted); font-size: 0.78rem; margin-top: 0.1rem; }
+    .tl-del { color: #dc2626; cursor: pointer; font-size: 0.78rem; background: none; border: none; font-family: inherit; }
+    .tl-empty { color: var(--muted); font-size: 0.84rem; font-style: italic; }
+    .add-int-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 0.75rem; }
+
+    /* ---- Toast ---- */
+    #toast { position: fixed; bottom: 1.5rem; right: 1.5rem; padding: 0.7rem 1.2rem; background: #1e293b; color: white; border-radius: 0.5rem; font-size: 0.875rem; z-index: 300; transition: opacity 0.3s; pointer-events: none; }
+
+    @media (max-width: 640px) {
+      main { padding: 0.75rem; }
+      header { padding: 0.5rem 0.875rem; }
+      nav { padding: 0 0.5rem; overflow-x: auto; }
+      .house-grid { grid-template-columns: 1fr; }
+      .two-col, .three-col { grid-template-columns: 1fr; }
+      .add-int-row { grid-template-columns: 1fr; }
+      .modal-overlay { padding: 0; align-items: flex-end; }
+      .modal-card { padding: 1.25rem; border-radius: 1rem 1rem 0 0; max-width: 100%; max-height: 94vh; }
+      #map { height: calc(100vh - 200px); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen" class="auth-screen">
+  <div class="auth-card">
+    <h1>🏡 Berkeley House Search</h1>
+    <p>Sign in to continue</p>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="you@example.com"
+             onkeydown="if(event.key==='Enter')document.getElementById('login-pw').focus()">
+    </div>
+    <div class="form-group">
+      <label>Password</label>
+      <input type="password" id="login-pw" placeholder="••••••••"
+             onkeydown="if(event.key==='Enter')login()">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="login()">Sign in</button>
+    <div id="login-error" class="auth-error"></div>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="hidden">
+  <header>
+    <div class="header-left">
+      <h1>🏡 Berkeley House Search</h1>
+      <span id="user-badge" class="user-badge"></span>
+    </div>
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <button class="btn btn-primary btn-sm" onclick="openHouseModal()">+ Add house</button>
+      <button class="btn btn-secondary btn-sm" onclick="logout()">Sign out</button>
+    </div>
+  </header>
+
+  <nav>
+    <button class="nav-btn active" onclick="showView('list',this)">🗂 Houses</button>
+    <button class="nav-btn" onclick="showView('map',this)">🗺 Map</button>
+    <button class="nav-btn" onclick="showView('calendar',this)">📅 Calendar</button>
+  </nav>
+
+  <main>
+    <!-- LIST -->
+    <div id="view-list">
+      <div id="status-filters" class="filters"></div>
+      <div id="house-grid" class="house-grid"></div>
+      <div id="list-empty" class="empty-state hidden">
+        <div class="big">🏠</div>
+        <p>No houses yet. Click <strong>+ Add house</strong> to start tracking.</p>
+      </div>
+    </div>
+
+    <!-- MAP -->
+    <div id="view-map" class="hidden">
+      <div id="map"></div>
+    </div>
+
+    <!-- CALENDAR -->
+    <div id="view-calendar" class="hidden">
+      <div class="cal-toolbar">
+        <div style="display:flex;align-items:center;gap:0.5rem;">
+          <button class="btn-icon" onclick="changeMonth(-1)">&#8592;</button>
+          <div class="cal-month-title" id="cal-month-title"></div>
+          <button class="btn-icon" onclick="changeMonth(1)">&#8594;</button>
+          <button class="btn btn-secondary btn-sm" onclick="goToday()">Today</button>
+        </div>
+        <div class="cal-legend">
+          <span>📅 Appointment</span><span>🎥 Video call</span><span>🏠 Open house</span>
+        </div>
+      </div>
+      <div id="cal-grid" class="cal-grid"></div>
+    </div>
+  </main>
+</div>
+
+<!-- HOUSE MODAL -->
+<div id="house-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeHouseModal()">
+  <div class="modal-card">
+    <div class="modal-title">🏡 <span id="hm-title">Add house</span></div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Listing</div>
+      <div class="form-group"><label>Name / short label</label><input type="text" id="h-title" placeholder="e.g. 2BR on Shattuck Ave"></div>
+      <div class="form-group">
+        <label>Listing URL</label>
+        <div style="display:flex;gap:0.5rem;align-items:stretch;">
+          <input type="url" id="h-url" placeholder="https://www.zillow.com/..." oninput="updateOpenLink()" style="flex:1">
+          <button type="button" class="btn btn-secondary btn-sm" id="fetch-btn" onclick="importFromUrl()" title="Auto-fill from the listing page" style="white-space:nowrap">⤓ Fetch</button>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="form-group"><label>Address</label><input type="text" id="h-address" placeholder="2120 Shattuck Ave, Berkeley, CA"></div>
+        <div class="form-group"><label>Neighborhood</label><input type="text" id="h-neighborhood" placeholder="Downtown / North Berkeley..."></div>
+      </div>
+      <div class="two-col">
+        <div class="form-group"><label>Unit / Apt # <span style="color:var(--muted);font-weight:400">(a listing often covers many)</span></label><input type="text" id="h-unit" placeholder="e.g. Apt 305"></div>
+        <div class="form-group"><label>Video tour URL</label><input type="url" id="h-video" placeholder="YouTube, Vimeo, Matterport, .mp4…" oninput="renderVideoEmbed()"></div>
+      </div>
+      <a id="hm-openlink" href="#" target="_blank" rel="noopener" class="hc-link hidden">↗ Open original listing</a>
+      <div id="video-embed"></div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Specs</div>
+      <div class="three-col">
+        <div class="form-group"><label>Rent ($/mo)</label><input type="number" id="h-rent" min="0" placeholder="3200"></div>
+        <div class="form-group"><label>Beds</label><input type="number" id="h-beds" min="0" step="0.5" placeholder="2"></div>
+        <div class="form-group"><label>Baths</label><input type="number" id="h-baths" min="0" step="0.5" placeholder="1"></div>
+      </div>
+      <div class="three-col">
+        <div class="form-group"><label>Sqft</label><input type="number" id="h-sqft" min="0" placeholder="900"></div>
+        <div class="form-group"><label>Available</label><input type="date" id="h-available"></div>
+        <div class="form-group"><label>Lease term</label><input type="text" id="h-lease" placeholder="12 mo"></div>
+      </div>
+      <div class="three-col">
+        <div class="form-group"><label>Parking</label>
+          <select id="h-parking"><option value="">—</option><option>None</option><option>Street</option><option>Driveway</option><option>Garage</option></select>
+        </div>
+        <div class="form-group"><label>Laundry</label>
+          <select id="h-laundry"><option value="">—</option><option>In-unit</option><option>Shared</option><option>None</option></select>
+        </div>
+        <div class="form-group"><label>Pets</label>
+          <select id="h-pets"><option value="">—</option><option>OK</option><option>Cats only</option><option>No</option></select>
+        </div>
+      </div>
+      <div class="form-group"><label>Cover photo URL <span style="color:var(--muted);font-weight:400">(optional)</span></label><input type="url" id="h-photo" placeholder="https://..."></div>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-title">Evaluation</div>
+      <div class="form-group"><label>Status</label><select id="h-status"></select></div>
+      <div class="rating-row" style="margin-bottom:1rem">
+        <div class="rating-block">
+          <span class="lbl">Your rating</span>
+          <div class="star-picker" id="h-rating"></div>
+        </div>
+        <div class="rating-block">
+          <span class="lbl">Partner's rating</span>
+          <div class="other-rating" id="h-other-rating">—</div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div class="form-group"><label>👍 Pros</label><textarea id="h-pros" rows="3" placeholder="Light, close to BART..."></textarea></div>
+        <div class="form-group"><label>👎 Cons</label><textarea id="h-cons" rows="3" placeholder="Noisy street, small kitchen..."></textarea></div>
+      </div>
+      <div class="form-group"><label>Notes</label><textarea id="h-notes" rows="2" placeholder="Anything else..."></textarea></div>
+    </div>
+
+    <!-- Interactions (only for saved houses) -->
+    <div class="modal-section hidden" id="interactions-section">
+      <div class="modal-section-title">Interactions</div>
+      <div id="timeline" class="timeline"></div>
+      <div class="add-int-row">
+        <select id="i-type">
+          <option value="email">📧 Email</option>
+          <option value="call">📞 Call</option>
+          <option value="directMessage">💬 Direct message</option>
+          <option value="videoTour">🎥 Video tour</option>
+          <option value="inPerson">🚶 In-person visit</option>
+          <option value="questionAsked">❓ Question asked</option>
+          <option value="other">• Other</option>
+        </select>
+        <input type="date" id="i-date">
+      </div>
+      <div class="add-int-row">
+        <input type="text" id="i-with" placeholder="With whom (landlord/agent)">
+        <input type="date" id="i-followup" title="Follow-up date (optional)">
+      </div>
+      <div class="form-group" style="margin-top:0.6rem"><textarea id="i-summary" rows="2" placeholder="What happened / outcome..."></textarea></div>
+      <button class="btn btn-secondary btn-sm" onclick="addInteraction()">+ Log interaction</button>
+    </div>
+
+    <!-- Schedule / calendar (only for saved houses) -->
+    <div class="modal-section hidden" id="schedule-section">
+      <div class="modal-section-title">Schedule</div>
+      <div id="house-events" class="timeline"></div>
+      <div class="add-int-row">
+        <select id="ev-type">
+          <option value="appointment">📅 Appointment</option>
+          <option value="videoAppointment">🎥 Video appointment</option>
+          <option value="openHouse">🏠 Open house</option>
+        </select>
+        <input type="date" id="ev-date">
+      </div>
+      <div class="add-int-row">
+        <input type="time" id="ev-start" title="Start time">
+        <input type="time" id="ev-end" title="End time (optional)">
+      </div>
+      <div class="form-group" style="margin-top:0.6rem"><input type="url" id="ev-link" placeholder="Video link (optional, for video appointments)"></div>
+      <div class="form-group"><input type="text" id="ev-note" placeholder="Note (optional)"></div>
+      <button class="btn btn-secondary btn-sm" onclick="addEvent()">+ Add to calendar</button>
+    </div>
+
+    <div class="modal-actions">
+      <button id="h-delete-btn" class="btn btn-danger btn-sm" onclick="deleteHouse()" style="margin-right:auto">🗑 Delete</button>
+      <button class="btn btn-secondary" onclick="closeHouseModal()">Close</button>
+      <button id="save-btn" class="btn btn-primary" onclick="saveHouse()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="hidden"></div>
+
+<script>
+// ================================================================
+// CONFIG  —  REPLACE with the new Firebase project's web config
+// (Firebase console → Project settings → Your apps → Web app → SDK setup)
+// ================================================================
+const firebaseConfig = {
+  apiKey:            "AIzaSyAM8OsVE69mk-7QcghltnAlpEZX0ole9tY",
+  authDomain:        "berkeley-houses.firebaseapp.com",
+  projectId:         "berkeley-houses",
+  storageBucket:     "berkeley-houses.firebasestorage.app",
+  messagingSenderId: "123020100055",
+  appId:             "1:123020100055:web:1285e1f0ec790d193a0b92",
+  measurementId:     "G-27FX0Q5VQX"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db   = firebase.firestore();
+
+// ================================================================
+// CONSTANTS
+// ================================================================
+const STATUSES = [
+  { key:'interested',    label:'Interested',     color:'#2563eb' },
+  { key:'contacted',     label:'Contacted',      color:'#7c3aed' },
+  { key:'tourScheduled', label:'Tour scheduled', color:'#d97706' },
+  { key:'toured',        label:'Toured',         color:'#0d9488' },
+  { key:'applied',       label:'Applied',        color:'#ea580c' },
+  { key:'accepted',      label:'Accepted',       color:'#16a34a' },
+  { key:'rejected',      label:'Rejected',       color:'#dc2626' },
+  { key:'dropped',       label:'Dropped',        color:'#64748b' },
+];
+const STATUS_MAP = Object.fromEntries(STATUSES.map(s => [s.key, s]));
+const INT_ICONS = { email:'📧', call:'📞', directMessage:'💬', videoTour:'🎥', inPerson:'🚶', questionAsked:'❓', other:'•' };
+const INT_LABELS = { email:'Email', call:'Call', directMessage:'Direct message', videoTour:'Video tour', inPerson:'In-person visit', questionAsked:'Question asked', other:'Other' };
+const EVENT_TYPES = {
+  appointment:      { label:'Appointment',       icon:'📅', color:'#2563eb' },
+  videoAppointment: { label:'Video appointment', icon:'🎥', color:'#7c3aed' },
+  openHouse:        { label:'Open house',         icon:'🏠', color:'#16a34a' },
+};
+const BERKELEY = [37.8715, -122.2730];
+const BANCROFT = [37.8722756, -122.2588768];  // Bancroft Library, UC Berkeley
+
+// CORS proxy for fetching listing pages from the browser.
+// This is the dedicated Cloudflare Worker (source: worker/listing-proxy.js).
+const PROXY_URL = "https://listing-proxy.angelo-cuzzola.workers.dev/?url=";
+
+// ================================================================
+// STATE
+// ================================================================
+let currentUser   = null;
+let houses        = [];     // cached list of {id, ...data}
+let editingHouse  = null;   // id or null
+let curRating     = 0;      // star picker value in modal
+let activeFilter  = 'all';
+let map           = null;
+let markerLayer   = null;
+let mapReady      = false;
+let calYear       = new Date().getFullYear();
+let calMonth      = new Date().getMonth();   // 0-11
+
+function housesCol() { return db.collection('houses'); }
+function interactionsCol(id) { return db.collection('houses').doc(id).collection('interactions'); }
+
+// ================================================================
+// HELPERS
+// ================================================================
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.remove('hidden'); t.style.opacity = '1';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.classList.add('hidden'), 300); }, 2200);
+}
+function $(id) { return document.getElementById(id); }
+function fmtMoney(n) { return n ? '$' + Number(n).toLocaleString('en-US') : ''; }
+function fmtDate(iso) { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${m}/${d}/${y}`; }
+function esc(s) { return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function starsHtml(n) {
+  n = Number(n) || 0;
+  let h = '';
+  for (let i=1;i<=5;i++) h += i<=n ? '★' : '<span class="empty">★</span>';
+  return `<span class="stars">${h}</span>`;
+}
+function sourceFromUrl(url) {
+  if (!url) return '';
+  const m = url.replace(/^https?:\/\//,'').split('/')[0].replace(/^www\./,'');
+  const known = { 'zillow.com':'Zillow','craigslist.org':'Craigslist','apartments.com':'Apartments.com','trulia.com':'Trulia','redfin.com':'Redfin','facebook.com':'Facebook','hotpads.com':'HotPads','padmapper.com':'PadMapper' };
+  for (const d in known) if (m.endsWith(d)) return known[d];
+  return m;
+}
+
+// ================================================================
+// AUTH
+// ================================================================
+async function login() {
+  const email = $('login-email').value.trim();
+  const pw    = $('login-pw').value;
+  $('login-error').textContent = '';
+  try { await auth.signInWithEmailAndPassword(email, pw); }
+  catch(_) { $('login-error').textContent = 'Incorrect email or password.'; }
+}
+function logout() { auth.signOut(); }
+
+auth.onAuthStateChanged(async user => {
+  if (user) {
+    currentUser = user;
+    $('login-screen').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    $('user-badge').textContent = user.email;
+    await loadHouses();
+  } else {
+    currentUser = null;
+    $('app').classList.add('hidden');
+    $('login-screen').classList.remove('hidden');
+  }
+});
+
+// ================================================================
+// VIEWS
+// ================================================================
+function showView(view, btn) {
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  $('view-list').classList.toggle('hidden', view !== 'list');
+  $('view-map').classList.toggle('hidden', view !== 'map');
+  $('view-calendar').classList.toggle('hidden', view !== 'calendar');
+  if (view === 'map') initMap();
+  if (view === 'calendar') renderCalendar();
+}
+
+// ================================================================
+// LOAD + RENDER HOUSES
+// ================================================================
+async function loadHouses() {
+  const snap = await housesCol().orderBy('createdAt', 'desc').get().catch(async () => {
+    // createdAt may be missing on old docs; fall back to unordered
+    return await housesCol().get();
+  });
+  houses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  renderFilters();
+  renderHouses();
+  if (mapReady) renderMarkers();
+  enrichHouses();
+}
+
+function renderFilters() {
+  const counts = { all: houses.length };
+  STATUSES.forEach(s => counts[s.key] = houses.filter(h => h.status === s.key).length);
+  const wrap = $('status-filters');
+  const chips = [`<button class="filter-chip ${activeFilter==='all'?'active':''}" onclick="setFilter('all')">All <span class="count">${counts.all}</span></button>`];
+  STATUSES.forEach(s => {
+    if (!counts[s.key]) return; // hide empty statuses
+    chips.push(`<button class="filter-chip ${activeFilter===s.key?'active':''}" onclick="setFilter('${s.key}')">
+      <span style="width:8px;height:8px;border-radius:50%;background:${s.color};display:inline-block"></span>
+      ${s.label} <span class="count">${counts[s.key]}</span></button>`);
+  });
+  wrap.innerHTML = chips.join('');
+}
+
+function setFilter(f) { activeFilter = f; renderFilters(); renderHouses(); }
+
+function renderHouses() {
+  const grid = $('house-grid');
+  const list = activeFilter === 'all' ? houses : houses.filter(h => h.status === activeFilter);
+  $('list-empty').classList.toggle('hidden', houses.length > 0);
+  grid.innerHTML = list.map(h => {
+    const st = STATUS_MAP[h.status] || STATUS_MAP.interested;
+    const photo = h.photo
+      ? `<div class="hc-photo" style="background-image:url('${esc(h.photo)}')">`
+      : `<div class="hc-photo placeholder">🏠`;
+    const specs = [];
+    if (h.beds != null && h.beds !== '') specs.push(`${h.beds} bd`);
+    if (h.baths != null && h.baths !== '') specs.push(`${h.baths} ba`);
+    if (h.sqft) specs.push(`${h.sqft} ft²`);
+    if (h.neighborhood) specs.push(esc(h.neighborhood));
+    if (h.videoUrl) specs.push('🎥 Tour');
+    const myR = (h.ratings && h.ratings[currentUser.uid]) || 0;
+    const commuteHtml = (h.walkMin != null || h.bikeMin != null)
+      ? `<div class="hc-commute">${h.walkMin != null ? `🚶 ${h.walkMin} min` : ''}`
+        + `${(h.walkMin != null && h.bikeMin != null) ? ' · ' : ''}`
+        + `${h.bikeMin != null ? `🚴 ${h.bikeMin} min` : ''}`
+        + ` <span class="to">→ Bancroft</span></div>`
+      : '';
+    return `<div class="house-card" onclick="openHouseModal('${h.id}')">
+      ${photo}
+        <span class="hc-status" style="background:${st.color}">${st.label}</span>
+        ${h.rent ? `<span class="hc-rent">${fmtMoney(h.rent)}</span>` : ''}
+      </div>
+      <div class="hc-body">
+        <div class="hc-title">${esc(h.title || h.address || 'Untitled')}${h.unit ? ` · ${esc(h.unit)}` : ''}</div>
+        ${h.address ? `<div class="hc-address">📍 ${esc(h.address)}</div>` : ''}
+        ${commuteHtml}
+        <div class="hc-specs">${specs.map(s => `<span class="spec-chip">${s}</span>`).join('')}</div>
+        <div class="hc-foot">
+          <div class="hc-ratings">${starsHtml(myR)}</div>
+          ${h.url ? `<a class="hc-link" href="${esc(h.url)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">↗ ${esc(sourceFromUrl(h.url))}</a>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ================================================================
+// HOUSE MODAL
+// ================================================================
+function buildStatusOptions() {
+  $('h-status').innerHTML = STATUSES.map(s => `<option value="${s.key}">${s.label}</option>`).join('');
+}
+function renderStarPicker() {
+  const el = $('h-rating');
+  el.innerHTML = [1,2,3,4,5].map(i => `<span data-v="${i}" class="${i<=curRating?'on':''}" onclick="setRating(${i})">★</span>`).join('');
+}
+function setRating(v) { curRating = (curRating === v ? 0 : v); renderStarPicker(); }
+
+function openHouseModal(id) {
+  editingHouse = id || null;
+  buildStatusOptions();
+  const h = id ? houses.find(x => x.id === id) : null;
+  $('hm-title').textContent = h ? (h.title || h.address || 'House') : 'Add house';
+  $('h-title').value = h?.title || '';
+  $('h-url').value = h?.url || '';
+  $('h-address').value = h?.address || '';
+  $('h-neighborhood').value = h?.neighborhood || '';
+  $('h-unit').value = h?.unit || '';
+  $('h-video').value = h?.videoUrl || '';
+  renderVideoEmbed();
+  $('h-rent').value = h?.rent ?? '';
+  $('h-beds').value = h?.beds ?? '';
+  $('h-baths').value = h?.baths ?? '';
+  $('h-sqft').value = h?.sqft ?? '';
+  $('h-available').value = h?.availableDate || '';
+  $('h-lease').value = h?.leaseTerm || '';
+  $('h-parking').value = h?.parking || '';
+  $('h-laundry').value = h?.laundry || '';
+  $('h-pets').value = h?.pets || '';
+  $('h-photo').value = h?.photo || '';
+  $('h-status').value = h?.status || 'interested';
+  $('h-pros').value = h?.pros || '';
+  $('h-cons').value = h?.cons || '';
+  $('h-notes').value = h?.notes || '';
+  curRating = (h?.ratings && h.ratings[currentUser.uid]) || 0;
+  renderStarPicker();
+  // partner rating
+  let other = '—';
+  if (h?.ratings) {
+    const entries = Object.entries(h.ratings).filter(([uid]) => uid !== currentUser.uid);
+    if (entries.length) other = entries.map(([,v]) => starsHtml(v)).join(' ');
+  }
+  $('h-other-rating').innerHTML = other;
+  updateOpenLink();
+  $('h-delete-btn').style.display = id ? 'inline-flex' : 'none';
+  // interactions
+  const sec = $('interactions-section');
+  if (id) { sec.classList.remove('hidden'); $('i-date').value = new Date().toISOString().split('T')[0]; loadInteractions(id); }
+  else { sec.classList.add('hidden'); }
+  // schedule
+  const sch = $('schedule-section');
+  if (id) { sch.classList.remove('hidden'); $('ev-date').value = new Date().toISOString().split('T')[0]; renderHouseEvents(id); }
+  else { sch.classList.add('hidden'); }
+  $('house-modal').classList.remove('hidden');
+}
+function closeHouseModal() { $('house-modal').classList.add('hidden'); editingHouse = null; $('video-embed').innerHTML = ''; }
+
+// ---- Video tour embedding ----
+function videoEmbed(url) {
+  url = (url || '').trim();
+  if (!url) return '';
+  const frame = src => `<div class="video-wrap"><iframe src="${src}" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>`;
+  let m;
+  if ((m = url.match(/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([\w-]{11})/))) return frame(`https://www.youtube.com/embed/${m[1]}`);
+  if ((m = url.match(/vimeo\.com\/(?:video\/)?(\d+)/)))                                            return frame(`https://player.vimeo.com/video/${m[1]}`);
+  if ((m = url.match(/matterport\.com\/show\/\?m=([\w-]+)/)))                                       return frame(`https://my.matterport.com/show/?m=${m[1]}`);
+  if ((m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/)))                                     return frame(`https://drive.google.com/file/d/${m[1]}/preview`);
+  if (/\.(mp4|webm|ogg|mov)(\?|$)/i.test(url))                                                      return `<video class="video-player" controls preload="metadata" src="${esc(url)}"></video>`;
+  return `<a class="hc-link" href="${esc(url)}" target="_blank" rel="noopener">▶ Open video tour ↗</a>`;
+}
+function renderVideoEmbed() { $('video-embed').innerHTML = videoEmbed($('h-video').value); }
+
+// ================================================================
+// SCHEDULE / CALENDAR  (events stored as an array on each house doc)
+// ================================================================
+const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function newEventId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+function renderHouseEvents(houseId) {
+  const h = houses.find(x => x.id === houseId);
+  const el = $('house-events');
+  const evs = ((h && h.events) || []).slice()
+    .sort((a, b) => (a.date + (a.startTime || '')).localeCompare(b.date + (b.startTime || '')));
+  if (!evs.length) { el.innerHTML = '<div class="tl-empty">No appointments or open houses yet.</div>'; return; }
+  el.innerHTML = evs.map(ev => {
+    const t = EVENT_TYPES[ev.type] || EVENT_TYPES.appointment;
+    const time = ev.startTime ? ev.startTime + (ev.endTime ? '–' + ev.endTime : '') : '';
+    return `<div class="tl-item">
+      <div class="tl-icon">${t.icon}</div>
+      <div class="tl-body">
+        <div class="tl-head"><span class="tl-type">${t.label}</span><span class="tl-date">${fmtDate(ev.date)}${time ? ' · ' + time : ''}</span></div>
+        ${ev.note ? `<div>${esc(ev.note)}</div>` : ''}
+        ${ev.link ? `<div><a class="hc-link" href="${esc(ev.link)}" target="_blank" rel="noopener">▶ Join link ↗</a></div>` : ''}
+        <button class="tl-del" onclick="deleteEvent('${ev.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function addEvent() {
+  if (!editingHouse) return;
+  const date = $('ev-date').value;
+  if (!date) { toast('Pick a date'); return; }
+  const ev = {
+    id: newEventId(),
+    type: $('ev-type').value,
+    date,
+    startTime: $('ev-start').value || '',
+    endTime: $('ev-end').value || '',
+    link: $('ev-link').value.trim(),
+    note: $('ev-note').value.trim(),
+  };
+  const h = houses.find(x => x.id === editingHouse);
+  const events = (h.events || []).concat(ev);
+  try {
+    await housesCol().doc(editingHouse).update({ events });
+    h.events = events;
+    $('ev-start').value = ''; $('ev-end').value = ''; $('ev-link').value = ''; $('ev-note').value = '';
+    toast('Added to calendar');
+    renderHouseEvents(editingHouse);
+    if (!$('view-calendar').classList.contains('hidden')) renderCalendar();
+  } catch (e) { toast('Failed: ' + e.message); }
+}
+
+async function deleteEvent(id) {
+  if (!editingHouse) return;
+  const h = houses.find(x => x.id === editingHouse);
+  const events = (h.events || []).filter(e => e.id !== id);
+  try {
+    await housesCol().doc(editingHouse).update({ events });
+    h.events = events;
+    renderHouseEvents(editingHouse);
+    if (!$('view-calendar').classList.contains('hidden')) renderCalendar();
+  } catch (e) { toast('Failed: ' + e.message); }
+}
+
+function allEvents() {
+  const out = [];
+  houses.forEach(h => (h.events || []).forEach(ev =>
+    out.push({ ...ev, houseId: h.id, houseTitle: h.title || h.address || 'Untitled' })));
+  return out;
+}
+
+function renderCalendar() {
+  $('cal-month-title').textContent = `${MONTHS[calMonth]} ${calYear}`;
+  const byDate = {};
+  allEvents().forEach(ev => { (byDate[ev.date] = byDate[ev.date] || []).push(ev); });
+
+  const startDow = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const cells = [];
+  for (let i = 0; i < startDow; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  let html = DOW.map(d => `<div class="cal-dow">${d}</div>`).join('');
+  html += cells.map(d => {
+    if (d === null) return `<div class="cal-day other-month"></div>`;
+    const ds = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const evs = (byDate[ds] || []).sort((a, b) => (a.startTime || '').localeCompare(b.startTime || ''));
+    const chips = evs.map(ev => {
+      const t = EVENT_TYPES[ev.type] || EVENT_TYPES.appointment;
+      const time = ev.startTime ? ev.startTime + ' ' : '';
+      return `<div class="cal-event" style="border-left-color:${t.color}" title="${esc(ev.houseTitle)}${ev.note ? ' — ' + esc(ev.note) : ''}" onclick="openHouseModal('${ev.houseId}')">${t.icon} ${esc(time)}${esc(ev.houseTitle)}</div>`;
+    }).join('');
+    return `<div class="cal-day${ds === todayStr ? ' today' : ''}"><div class="cal-daynum">${d}</div>${chips}</div>`;
+  }).join('');
+  $('cal-grid').innerHTML = html;
+}
+
+function changeMonth(delta) {
+  calMonth += delta;
+  if (calMonth < 0) { calMonth = 11; calYear--; }
+  if (calMonth > 11) { calMonth = 0; calYear++; }
+  renderCalendar();
+}
+function goToday() { const n = new Date(); calYear = n.getFullYear(); calMonth = n.getMonth(); renderCalendar(); }
+function updateOpenLink() {
+  const url = $('h-url').value.trim();
+  const link = $('hm-openlink');
+  if (url) { link.href = url; link.classList.remove('hidden'); } else { link.classList.add('hidden'); }
+}
+
+let savingHouse = false;
+async function saveHouse() {
+  if (savingHouse) return;
+  const data = {
+    title:        $('h-title').value.trim(),
+    url:          $('h-url').value.trim(),
+    source:       sourceFromUrl($('h-url').value.trim()),
+    address:      $('h-address').value.trim(),
+    neighborhood: $('h-neighborhood').value.trim(),
+    unit:         $('h-unit').value.trim(),
+    videoUrl:     $('h-video').value.trim(),
+    rent:         numOrNull($('h-rent').value),
+    beds:         numOrNull($('h-beds').value),
+    baths:        numOrNull($('h-baths').value),
+    sqft:         numOrNull($('h-sqft').value),
+    availableDate:$('h-available').value,
+    leaseTerm:    $('h-lease').value.trim(),
+    parking:      $('h-parking').value,
+    laundry:      $('h-laundry').value,
+    pets:         $('h-pets').value,
+    photo:        $('h-photo').value.trim(),
+    status:       $('h-status').value,
+    pros:         $('h-pros').value.trim(),
+    cons:         $('h-cons').value.trim(),
+    notes:        $('h-notes').value.trim(),
+    updatedAt:    firebase.firestore.FieldValue.serverTimestamp(),
+  };
+  if (!data.title && !data.address) { toast('Add at least a name or address'); return; }
+
+  // ratings: merge current user's star value into the map
+  const existing = editingHouse ? houses.find(h => h.id === editingHouse) : null;
+  const ratings = Object.assign({}, existing?.ratings || {});
+  if (curRating) ratings[currentUser.uid] = curRating; else delete ratings[currentUser.uid];
+  data.ratings = ratings;
+
+  savingHouse = true;
+  const saveBtn = $('save-btn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  try {
+    // geocode if address present and (new, or address changed)
+    if (data.address && (!existing || existing.address !== data.address || existing.lat == null)) {
+      const geo = await geocode(data.address);
+      if (geo) { data.lat = geo.lat; data.lng = geo.lng; }
+    } else if (existing) {
+      data.lat = existing.lat ?? null; data.lng = existing.lng ?? null;
+    }
+
+    // travel times to Bancroft Library (walking + cycling)
+    if (data.lat != null && data.lng != null) {
+      const tt = await travelTimes(data.lat, data.lng);
+      data.walkMin = tt.walkMin;
+      data.bikeMin = tt.bikeMin;
+    }
+
+    if (editingHouse) {
+      await housesCol().doc(editingHouse).update(data);
+    } else {
+      data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      data.createdBy = currentUser.email;
+      await housesCol().add(data);
+    }
+    toast('Saved');
+    closeHouseModal();
+    await loadHouses();
+  } catch (e) {
+    console.error(e); toast('Save failed: ' + e.message);
+  } finally {
+    savingHouse = false;
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+  }
+}
+function numOrNull(v) { return v === '' || v == null ? null : Number(v); }
+
+async function deleteHouse() {
+  if (!editingHouse) return;
+  if (!confirm('Delete this house and all its interactions?')) return;
+  try {
+    await housesCol().doc(editingHouse).delete();
+    toast('Deleted'); closeHouseModal(); await loadHouses();
+  } catch (e) { toast('Delete failed: ' + e.message); }
+}
+
+// ================================================================
+// INTERACTIONS
+// ================================================================
+async function loadInteractions(houseId) {
+  const tl = $('timeline');
+  tl.innerHTML = '<div class="tl-empty">Loading…</div>';
+  const snap = await interactionsCol(houseId).orderBy('date', 'desc').get().catch(() => interactionsCol(houseId).get());
+  const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  if (!items.length) { tl.innerHTML = '<div class="tl-empty">No interactions logged yet.</div>'; return; }
+  tl.innerHTML = items.map(it => `
+    <div class="tl-item">
+      <div class="tl-icon">${INT_ICONS[it.type] || '•'}</div>
+      <div class="tl-body">
+        <div class="tl-head">
+          <span class="tl-type">${INT_LABELS[it.type] || 'Other'}${it.withWhom ? ' · ' + esc(it.withWhom) : ''}</span>
+          <span class="tl-date">${fmtDate(it.date)}</span>
+        </div>
+        ${it.summary ? `<div>${esc(it.summary)}</div>` : ''}
+        ${it.followUpDate ? `<div class="tl-meta">⏰ Follow up: ${fmtDate(it.followUpDate)}</div>` : ''}
+        <button class="tl-del" onclick="deleteInteraction('${houseId}','${it.id}')">Delete</button>
+      </div>
+    </div>`).join('');
+}
+
+async function addInteraction() {
+  if (!editingHouse) return;
+  const data = {
+    type:        $('i-type').value,
+    date:        $('i-date').value || new Date().toISOString().split('T')[0],
+    withWhom:    $('i-with').value.trim(),
+    summary:     $('i-summary').value.trim(),
+    followUpDate:$('i-followup').value || null,
+    createdAt:   firebase.firestore.FieldValue.serverTimestamp(),
+    createdBy:   currentUser.email,
+  };
+  try {
+    await interactionsCol(editingHouse).add(data);
+    $('i-with').value = ''; $('i-summary').value = ''; $('i-followup').value = '';
+    toast('Interaction logged');
+    loadInteractions(editingHouse);
+  } catch (e) { toast('Failed: ' + e.message); }
+}
+
+async function deleteInteraction(houseId, intId) {
+  if (!confirm('Delete this interaction?')) return;
+  await interactionsCol(houseId).doc(intId).delete();
+  loadInteractions(houseId);
+}
+
+// ================================================================
+// IMPORT FROM LISTING URL  (Phase 4)
+// Fetches the page via a CORS proxy, parses Open Graph + JSON-LD,
+// and pre-fills empty form fields (including the preview photo).
+// ================================================================
+async function importFromUrl() {
+  const url = $('h-url').value.trim();
+  if (!url) { toast('Paste a listing URL first'); return; }
+  const btn = $('fetch-btn'); const old = btn.textContent;
+  btn.textContent = '…'; btn.disabled = true;
+  toast('Fetching listing…');
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const res = await fetch(PROXY_URL + encodeURIComponent(url), { signal: ctrl.signal });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const html = await res.text();
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const meta = p => doc.querySelector(`meta[property="${p}"]`)?.content
+                   || doc.querySelector(`meta[name="${p}"]`)?.content || '';
+    const fillIf = (id, val) => { if (val && !$(id).value) { $(id).value = val; return true; } return false; };
+    const found = [];
+
+    if (fillIf('h-title', (meta('og:title') || doc.title || '').trim().slice(0,120))) found.push('title');
+    if (fillIf('h-photo', meta('og:image'))) found.push('photo');
+
+    const ld = extractJsonLd(doc);
+    if (ld) {
+      if (fillIf('h-rent',    ld.price))   found.push('rent');
+      if (fillIf('h-address', ld.address)) found.push('address');
+      if (fillIf('h-beds',    ld.beds))    found.push('beds');
+      if (fillIf('h-baths',   ld.baths))   found.push('baths');
+      if (fillIf('h-sqft',    ld.sqft))    found.push('sqft');
+    }
+    // Fallback: scrape rent/beds from the description text
+    const desc = meta('og:description') || '';
+    if (!$('h-rent').value)  { const m = desc.match(/\$\s?([\d,]{3,6})/);        if (m && fillIf('h-rent',  m[1].replace(/,/g,''))) found.push('rent'); }
+    if (!$('h-beds').value)  { const m = desc.match(/(\d+(?:\.\d)?)\s*(?:bd|bed)/i); if (m && fillIf('h-beds',  m[1])) found.push('beds'); }
+    if (!$('h-baths').value) { const m = desc.match(/(\d+(?:\.\d)?)\s*(?:ba|bath)/i);if (m && fillIf('h-baths', m[1])) found.push('baths'); }
+
+    updateOpenLink();
+    toast(found.length ? ('Imported: ' + [...new Set(found)].join(', ')) : 'No structured data found — fill manually');
+  } catch (e) {
+    console.warn('import failed', e);
+    const why = e.name === 'AbortError' ? 'timed out' : 'failed (' + (e.message || '') + ')';
+    toast('Fetch ' + why + ' — try /add-listing or set up the proxy worker');
+  } finally {
+    clearTimeout(timer);
+    btn.textContent = old; btn.disabled = false;
+  }
+}
+
+function extractJsonLd(doc) {
+  const blocks = [...doc.querySelectorAll('script[type="application/ld+json"]')];
+  for (const b of blocks) {
+    let data; try { data = JSON.parse(b.textContent); } catch { continue; }
+    const nodes = Array.isArray(data) ? data : (data['@graph'] || [data]);
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object') continue;
+      const out = {};
+      const price = node.price || node.offers?.price || node.offers?.lowPrice;
+      if (price) out.price = String(price).replace(/[^0-9.]/g,'');
+      const a = node.address;
+      if (typeof a === 'string') out.address = a;
+      else if (a && typeof a === 'object') out.address = [a.streetAddress, a.addressLocality, a.addressRegion].filter(Boolean).join(', ');
+      if (node.numberOfBedrooms) out.beds = node.numberOfBedrooms;
+      const baths = node.numberOfBathroomsTotal || node.numberOfBathrooms;
+      if (baths) out.baths = baths;
+      const fs = node.floorSize?.value || node.floorSize;
+      if (fs) out.sqft = String(fs).replace(/[^0-9.]/g,'');
+      if (Object.keys(out).length) return out;
+    }
+  }
+  return null;
+}
+
+// ================================================================
+// GEOCODING (Nominatim / OpenStreetMap — free, no key)
+// ================================================================
+async function geocode(address) {
+  try {
+    const q = encodeURIComponent(address.includes('Berkeley') ? address : address + ', Berkeley, CA');
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
+      { headers: { 'Accept': 'application/json' } });
+    const arr = await res.json();
+    if (arr && arr.length) return { lat: parseFloat(arr[0].lat), lng: parseFloat(arr[0].lon) };
+  } catch (e) { console.warn('geocode failed', e); }
+  return null;
+}
+
+// ================================================================
+// TRAVEL TIME TO BANCROFT LIBRARY (Valhalla / OpenStreetMap — free, no key)
+// ================================================================
+async function routeMinutes(lat, lng, costing) {
+  try {
+    const res = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat, lon: lng }, { lat: BANCROFT[0], lon: BANCROFT[1] }],
+        costing
+      })
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const t = d?.trip?.summary?.time;
+    return t ? Math.round(t / 60) : null;
+  } catch (e) { console.warn('route failed', e); return null; }
+}
+
+async function travelTimes(lat, lng) {
+  const [walkMin, bikeMin] = await Promise.all([
+    routeMinutes(lat, lng, 'pedestrian'),
+    routeMinutes(lat, lng, 'bicycle')
+  ]);
+  return { walkMin, bikeMin };
+}
+
+// Lazily fill commute times for houses geocoded before this feature existed.
+async function backfillCommute() {
+  const todo = houses.filter(h => h.lat != null && h.lng != null && h.walkMin == null && h.bikeMin == null);
+  for (const h of todo) {
+    const tt = await travelTimes(h.lat, h.lng);
+    if (tt.walkMin == null && tt.bikeMin == null) continue;
+    const upd = { walkMin: tt.walkMin, bikeMin: tt.bikeMin };
+    await housesCol().doc(h.id).update(upd).catch(() => {});
+    Object.assign(h, upd);
+    renderHouses();
+  }
+}
+
+// Self-heal: houses added via the cloud may lack coords (Nominatim is blocked
+// there). Geocode them in the browser, then commute times back-fill from there.
+async function enrichHouses() {
+  let changed = false;
+  for (const h of houses.filter(x => x.address && (x.lat == null || x.lng == null))) {
+    const geo = await geocode(h.address);
+    if (geo) {
+      await housesCol().doc(h.id).update({ lat: geo.lat, lng: geo.lng }).catch(() => {});
+      h.lat = geo.lat; h.lng = geo.lng; changed = true;
+    }
+  }
+  if (changed) { renderHouses(); if (mapReady) renderMarkers(); }
+  await backfillCommute();
+}
+
+// ================================================================
+// MAP (Leaflet)
+// ================================================================
+function initMap() {
+  if (mapReady) { setTimeout(() => map.invalidateSize(), 100); renderMarkers(); return; }
+  map = L.map('map').setView(BERKELEY, 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+  mapReady = true;
+  setTimeout(() => map.invalidateSize(), 100);
+  renderMarkers();
+}
+
+function renderMarkers() {
+  if (!markerLayer) return;
+  markerLayer.clearLayers();
+  const pts = [];
+  houses.filter(h => h.lat != null && h.lng != null).forEach(h => {
+    const st = STATUS_MAP[h.status] || STATUS_MAP.interested;
+    const icon = L.divIcon({ className: '', html: `<div class="map-pin" style="background:${st.color}"></div>`, iconSize: [22,22], iconAnchor: [11,22] });
+    const m = L.marker([h.lat, h.lng], { icon }).addTo(markerLayer);
+    m.bindPopup(`<div class="popup-title">${esc(h.title || h.address || 'House')}</div>
+      ${h.rent ? `<div class="popup-rent">${fmtMoney(h.rent)}/mo</div>` : ''}
+      <div style="color:${st.color};font-weight:600;font-size:0.78rem">${st.label}</div>
+      <span class="popup-btn" onclick="openHouseModal('${h.id}')">Open details →</span>`);
+    pts.push([h.lat, h.lng]);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [40,40], maxZoom: 15 });
+}
+</script>
+</body>
+</html>
