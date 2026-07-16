@@ -143,6 +143,18 @@ def http_json(url, body=None, headers=None, method="POST"):
             return e.code, {"error": e.read().decode(errors="replace")[:300]}
 
 
+def err_status(res):
+    """Pull an error status out of a Firestore reply (which may be a list)."""
+    if isinstance(res, list):
+        for r in res:
+            if isinstance(r, dict) and r.get("error"):
+                return r["error"].get("status") or r["error"].get("message")
+        return str(res)[:120]
+    if isinstance(res, dict):
+        return (res.get("error") or {}).get("status") or str(res)[:120]
+    return str(res)[:120]
+
+
 # Fields worth writing on an UPDATE (skip blanks so a partial re-scrape never
 # wipes existing data; never touch ratings/events here).
 def meaningful(doc):
@@ -229,20 +241,34 @@ def write_rest(doc, created_by):
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     base = f"https://firestore.googleapis.com/v1/projects/{PROJECT_ID}/databases/(default)/documents"
 
-    # dedup: find an existing listing with this URL
+    # Dedup: find an existing listing with this URL.
+    # NOTE: the query MUST also filter on `city` — the security rules gate reads on
+    # resource.data.city, and Firestore rejects a query it cannot prove is allowed
+    # from the filters alone. Filtering only by url returns 403 and would silently
+    # create a duplicate.
     existing_name = None
     if doc.get("url"):
         q = {"structuredQuery": {
             "from": [{"collectionId": "houses"}],
-            "where": {"fieldFilter": {"field": {"fieldPath": "url"},
-                                      "op": "EQUAL", "value": {"stringValue": doc["url"]}}},
+            "where": {"compositeFilter": {"op": "AND", "filters": [
+                {"fieldFilter": {"field": {"fieldPath": "url"},
+                                 "op": "EQUAL", "value": {"stringValue": doc["url"]}}},
+                {"fieldFilter": {"field": {"fieldPath": "city"},
+                                 "op": "EQUAL", "value": {"stringValue": doc.get("city", "berkeley")}}},
+            ]}},
             "limit": 1}}
         code, res = http_json(f"{base}:runQuery?key={api_key}", q, auth)
-        if code == 200:
-            for row in res:
-                if row.get("document"):
-                    existing_name = row["document"]["name"]
-                    break
+        if code != 200:
+            # Never fail silently: a broken dedup check means duplicates.
+            raise SystemExit(f"Dedup lookup failed (HTTP {code}): {err_status(res)}. "
+                             "Refusing to write, to avoid creating a duplicate.")
+        for row in res:
+            if isinstance(row, dict) and row.get("error"):
+                raise SystemExit(f"Dedup lookup denied: {row['error'].get('status')}. "
+                                 "Refusing to write, to avoid creating a duplicate.")
+            if isinstance(row, dict) and row.get("document"):
+                existing_name = row["document"]["name"]
+                break
 
     if existing_name:  # update only non-blank fields; preserve createdAt/ratings/events
         upd = meaningful(doc)
