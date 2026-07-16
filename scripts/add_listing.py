@@ -37,7 +37,7 @@ DEFAULT_WEB_API_KEY = "AIzaSyAM8OsVE69mk-7QcghltnAlpEZX0ole9tY"  # public web ke
 
 FIELDS = {
     "title": "", "url": "", "source": "", "address": "", "neighborhood": "",
-    "unit": "", "videoUrl": "",
+    "unit": "", "videoUrl": "", "city": "berkeley",
     "rent": None, "beds": None, "baths": None, "sqft": None,
     "availableDate": "", "leaseTerm": "", "parking": "", "laundry": "", "pets": "",
     "photo": "", "status": "interested", "pros": "", "cons": "", "notes": "",
@@ -69,14 +69,23 @@ def coerce_number(val):
     return float(s) if "." in s else int(float(s))
 
 
-BANCROFT = (37.8722756, -122.2588768)  # Bancroft Library, UC Berkeley
+# Per-city geocoding bias and the anchor that walk/bike times are measured to.
+CITY_CFG = {
+    "berkeley": {"geo": "Berkeley, CA",
+                 "anchor": (37.8722756, -122.2588768),   # Bancroft Library, UC Berkeley
+                 "bias": (37.87, -122.27)},
+    "lausanne": {"geo": "Lausanne, Switzerland",
+                 "anchor": (46.5186594, 6.5665615),      # EPFL campus (School of Management)
+                 "bias": (46.52, 6.63)},
+}
 
 
-def geocode(address):
-    q = address if "Berkeley" in address else address + ", Berkeley, CA"
+def geocode(address, city="berkeley"):
+    cfg = CITY_CFG[city]
+    q = address if cfg["geo"].split(",")[0] in address else address + ", " + cfg["geo"]
     # Photon first — reachable from cloud envs where Nominatim is blocked.
     try:
-        url = ("https://photon.komoot.io/api/?limit=1&lat=37.87&lon=-122.27&q="
+        url = (f"https://photon.komoot.io/api/?limit=1&lat={cfg['bias'][0]}&lon={cfg['bias'][1]}&q="
                + urllib.parse.quote(q))
         req = urllib.request.Request(url, headers={"User-Agent": "berkeley-houses/1.0"})
         with urllib.request.urlopen(req, timeout=15) as r:
@@ -100,11 +109,12 @@ def geocode(address):
     return None, None
 
 
-def travel_minutes(lat, lng, costing):
+def travel_minutes(lat, lng, costing, city="berkeley"):
+    anchor = CITY_CFG[city]["anchor"]
     try:
         body = json.dumps({
             "locations": [{"lat": lat, "lon": lng},
-                          {"lat": BANCROFT[0], "lon": BANCROFT[1]}],
+                          {"lat": anchor[0], "lon": anchor[1]}],
             "costing": costing,
         }).encode()
         req = urllib.request.Request("https://valhalla1.openstreetmap.de/route",
@@ -280,13 +290,17 @@ def main():
     if not doc["title"] and not doc["address"]:
         sys.exit("Need at least 'title' or 'address'.")
 
+    doc["city"] = (doc.get("city") or "berkeley").strip().lower()
+    if doc["city"] not in CITY_CFG:
+        sys.exit(f"Unknown city {doc['city']!r}. Use one of: {', '.join(CITY_CFG)}")
+
     lat, lng = incoming.get("lat"), incoming.get("lng")
     if (lat is None or lng is None) and doc["address"]:
-        lat, lng = geocode(doc["address"])
+        lat, lng = geocode(doc["address"], doc["city"])
     doc["lat"], doc["lng"] = lat, lng
     if lat is not None and lng is not None:
-        wm = travel_minutes(lat, lng, "pedestrian")
-        bm = travel_minutes(lat, lng, "bicycle")
+        wm = travel_minutes(lat, lng, "pedestrian", doc["city"])
+        bm = travel_minutes(lat, lng, "bicycle", doc["city"])
         if wm is not None:
             doc["walkMin"] = wm
         if bm is not None:

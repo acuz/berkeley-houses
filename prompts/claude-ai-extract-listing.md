@@ -27,7 +27,10 @@ When I send you a listing URL (and maybe a few words of my own), do this:
 Keys and rules:
 - `title` (string): short label, e.g. "1BR on Delaware St"
 - `url` (string): the listing URL — always include
-- `address` (string): full street address incl. "Berkeley, CA"
+- `city` (string): `berkeley` or `lausanne` — infer from the listing's location
+  (default `berkeley` if it's clearly a Berkeley/Bay Area listing)
+- `address` (string): full street address incl. the city, e.g. "Berkeley, CA" or
+  "Lausanne, Switzerland"
 - `unit` (string): exact apartment/unit number if I mention one (a single listing
   link often covers many units), e.g. "Apt 305"
 - `videoUrl` (string): a video-tour link if the page has one (YouTube / Vimeo /

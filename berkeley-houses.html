@@ -63,6 +63,8 @@
     .header-left { display: flex; align-items: center; gap: 1rem; }
     header h1 { font-size: 1.05rem; font-weight: 700; }
     .user-badge { font-size: 0.78rem; padding: 0.25rem 0.6rem; border-radius: 9999px; background: #dbeafe; color: #1e40af; font-weight: 500; }
+    .city-select { font-family: inherit; font-size: 0.82rem; font-weight: 600; padding: 0.25rem 0.5rem; border: 1px solid var(--border); border-radius: 0.5rem; background: white; color: var(--text); cursor: pointer; }
+    .city-select:focus { outline: none; border-color: var(--primary); }
     nav { background: white; border-bottom: 1px solid var(--border); padding: 0 1.5rem; display: flex; }
     .nav-btn { padding: 0.75rem 1.1rem; font-size: 0.875rem; font-weight: 500; color: var(--muted); background: none; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 0.15s; margin-bottom: -1px; font-family: inherit; }
     .nav-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
@@ -206,7 +208,8 @@
 <div id="app" class="hidden">
   <header>
     <div class="header-left">
-      <h1>🏡 Berkeley House Search</h1>
+      <h1>🏡 House Search</h1>
+      <select id="city-select" class="city-select" onchange="switchCity(this.value)"></select>
       <span id="user-badge" class="user-badge"></span>
     </div>
     <div style="display:flex;gap:0.5rem;align-items:center;">
@@ -423,8 +426,33 @@ const EVENT_TYPES = {
   videoAppointment: { label:'Video appointment', icon:'🎥', color:'#7c3aed' },
   openHouse:        { label:'Open house',         icon:'🏠', color:'#16a34a' },
 };
-const BERKELEY = [37.8715, -122.2730];
-const BANCROFT = [37.8722756, -122.2588768];  // Bancroft Library, UC Berkeley
+// ---- Cities -------------------------------------------------------------
+const CITIES = {
+  berkeley: {
+    label: '🇺🇸 Berkeley',
+    center: [37.8715, -122.2730],
+    geoSuffix: 'Berkeley, CA',
+    anchor: { name: 'Bancroft', coords: [37.8722756, -122.2588768] },  // Bancroft Library, UC Berkeley
+    money: n => '$' + Number(n).toLocaleString('en-US'),
+  },
+  lausanne: {
+    label: '🇨🇭 Lausanne',
+    center: [46.5197, 6.6323],
+    geoSuffix: 'Lausanne, Switzerland',
+    anchor: { name: 'EPFL', coords: [46.5186594, 6.5665615] },          // EPFL campus (School of Management)
+    money: n => 'CHF ' + Number(n).toLocaleString('de-CH'),
+  },
+};
+// Which cities each account may see. Firestore rules enforce this server-side;
+// this map only decides what the UI offers.
+const CITY_ACCESS = {
+  'ewRt7NBEmtaCLKhAvtPuNmwPsC82': ['berkeley', 'lausanne'],  // angelo.cuzzola@gmail.com
+  '1xdx8P6hoDTVE1udIHMUdSGXKwq1': ['berkeley'],              // irene.nicolino@gmail.com
+  'IWH4pFgarWcwEyDh7b3zTYAfprI2': ['berkeley', 'lausanne'],  // claude-writer@berkeley.app (bot)
+  'LAUSANNE_USER_UID':            ['lausanne'],              // TODO: new Lausanne user
+};
+function myCities() { return CITY_ACCESS[currentUser?.uid] || ['berkeley']; }
+function city() { return CITIES[currentCity]; }
 
 // CORS proxy for fetching listing pages from the browser.
 // This is the dedicated Cloudflare Worker (source: worker/listing-proxy.js).
@@ -434,6 +462,7 @@ const PROXY_URL = "https://listing-proxy.angelo-cuzzola.workers.dev/?url=";
 // STATE
 // ================================================================
 let currentUser   = null;
+let currentCity   = localStorage.getItem('city') || 'berkeley';
 let houses        = [];     // cached list of {id, ...data}
 let editingHouse  = null;   // id or null
 let curRating     = 0;      // star picker value in modal
@@ -457,7 +486,7 @@ function toast(msg) {
   t._timer = setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.classList.add('hidden'), 300); }, 2200);
 }
 function $(id) { return document.getElementById(id); }
-function fmtMoney(n) { return n ? '$' + Number(n).toLocaleString('en-US') : ''; }
+function fmtMoney(n) { return n ? city().money(n) : ''; }
 function fmtDate(iso) { if (!iso) return ''; const [y,m,d] = iso.split('-'); return `${m}/${d}/${y}`; }
 function esc(s) { return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function starsHtml(n) {
@@ -486,12 +515,35 @@ async function login() {
 }
 function logout() { auth.signOut(); }
 
+// ---- City switching ----
+function setupCities() {
+  const mine = myCities();
+  if (!mine.includes(currentCity)) currentCity = mine[0];
+  const sel = $('city-select');
+  sel.innerHTML = mine.map(c => `<option value="${c}">${CITIES[c].label}</option>`).join('');
+  sel.value = currentCity;
+  sel.style.display = mine.length > 1 ? '' : 'none';  // hide when only one city
+  document.title = `${CITIES[currentCity].label.replace(/^\S+\s/, '')} House Search`;
+}
+
+async function switchCity(c) {
+  if (!myCities().includes(c)) return;
+  currentCity = c;
+  localStorage.setItem('city', c);
+  document.title = `${CITIES[c].label.replace(/^\S+\s/, '')} House Search`;
+  activeFilter = 'all';
+  if (mapReady) map.setView(CITIES[c].center, 13);
+  await loadHouses();
+  if (!$('view-calendar').classList.contains('hidden')) renderCalendar();
+}
+
 auth.onAuthStateChanged(async user => {
   if (user) {
     currentUser = user;
     $('login-screen').classList.add('hidden');
     $('app').classList.remove('hidden');
     $('user-badge').textContent = user.email;
+    setupCities();
     await loadHouses();
   } else {
     currentUser = null;
@@ -517,11 +569,10 @@ function showView(view, btn) {
 // LOAD + RENDER HOUSES
 // ================================================================
 async function loadHouses() {
-  const snap = await housesCol().orderBy('createdAt', 'desc').get().catch(async () => {
-    // createdAt may be missing on old docs; fall back to unordered
-    return await housesCol().get();
-  });
+  // Filter by city; sort client-side so no composite index is needed.
+  const snap = await housesCol().where('city', '==', currentCity).get();
   houses = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  houses.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
   renderFilters();
   renderHouses();
   if (mapReady) renderMarkers();
@@ -564,7 +615,7 @@ function renderHouses() {
       ? `<div class="hc-commute">${h.walkMin != null ? `🚶 ${h.walkMin} min` : ''}`
         + `${(h.walkMin != null && h.bikeMin != null) ? ' · ' : ''}`
         + `${h.bikeMin != null ? `🚴 ${h.bikeMin} min` : ''}`
-        + ` <span class="to">→ Bancroft</span></div>`
+        + ` <span class="to">→ ${city().anchor.name}</span></div>`
       : '';
     return `<div class="house-card" onclick="openHouseModal('${h.id}')">
       ${photo}
@@ -835,6 +886,7 @@ async function saveHouse() {
     } else {
       data.createdAt = firebase.firestore.FieldValue.serverTimestamp();
       data.createdBy = currentUser.email;
+      data.city = currentCity;
       await housesCol().add(data);
     }
     toast('Saved');
@@ -988,7 +1040,8 @@ function extractJsonLd(doc) {
 // ================================================================
 async function geocode(address) {
   try {
-    const q = encodeURIComponent(address.includes('Berkeley') ? address : address + ', Berkeley, CA');
+    const suffix = city().geoSuffix;
+    const q = encodeURIComponent(address.includes(suffix.split(',')[0]) ? address : address + ', ' + suffix);
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
       { headers: { 'Accept': 'application/json' } });
     const arr = await res.json();
@@ -998,14 +1051,14 @@ async function geocode(address) {
 }
 
 // ================================================================
-// TRAVEL TIME TO BANCROFT LIBRARY (Valhalla / OpenStreetMap — free, no key)
+// TRAVEL TIME TO THE CITY'S ANCHOR (Valhalla / OpenStreetMap — free, no key)
 // ================================================================
 async function routeMinutes(lat, lng, costing) {
   try {
     const res = await fetch('https://valhalla1.openstreetmap.de/route', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        locations: [{ lat, lon: lng }, { lat: BANCROFT[0], lon: BANCROFT[1] }],
+        locations: [{ lat, lon: lng }, { lat: city().anchor.coords[0], lon: city().anchor.coords[1] }],
         costing
       })
     });
@@ -1057,7 +1110,7 @@ async function enrichHouses() {
 // ================================================================
 function initMap() {
   if (mapReady) { setTimeout(() => map.invalidateSize(), 100); renderMarkers(); return; }
-  map = L.map('map').setView(BERKELEY, 13);
+  map = L.map('map').setView(city().center, 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '© OpenStreetMap contributors'
   }).addTo(map);
