@@ -13,8 +13,8 @@ service cloud.firestore {
       return c == 'lausanne'
         ? [
             'ewRt7NBEmtaCLKhAvtPuNmwPsC82',  // angelo.cuzzola@gmail.com
-            'IWH4pFgarWcwEyDh7b3zTYAfprI2'   // claude-writer@berkeley.app (bot)
-            // + new Lausanne user UID goes here
+            'IWH4pFgarWcwEyDh7b3zTYAfprI2',  // claude-writer@berkeley.app (bot)
+            'ItKOiRgYtiTXg1JeLRONWFRzHCh1'   // jacopo.marcheselli@gmail.com
           ]
         : [
             'ewRt7NBEmtaCLKhAvtPuNmwPsC82',  // angelo.cuzzola@gmail.com
