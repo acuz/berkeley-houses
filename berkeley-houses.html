@@ -1041,7 +1041,10 @@ function extractJsonLd(doc) {
 async function geocode(address) {
   try {
     const suffix = city().geoSuffix;
-    const q = encodeURIComponent(address.includes(suffix.split(',')[0]) ? address : address + ', ' + suffix);
+    // Only append the suffix if the address doesn't already locate itself
+    // (e.g. "Saint-Sulpice VD, Switzerland" is Lausanne-area but not "Lausanne").
+    const parts = suffix.split(',').map(p => p.trim());
+    const q = encodeURIComponent(parts.some(p => address.includes(p)) ? address : address + ', ' + suffix);
     const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${q}`,
       { headers: { 'Accept': 'application/json' } });
     const arr = await res.json();

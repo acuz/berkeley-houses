@@ -82,7 +82,11 @@ CITY_CFG = {
 
 def geocode(address, city="berkeley"):
     cfg = CITY_CFG[city]
-    q = address if cfg["geo"].split(",")[0] in address else address + ", " + cfg["geo"]
+    # Only append the city suffix if the address doesn't already locate itself.
+    # (e.g. "Saint-Sulpice VD, Switzerland" is in the Lausanne area but isn't
+    # literally "Lausanne" — appending would corrupt the query.)
+    parts = [p.strip() for p in cfg["geo"].split(",")]
+    q = address if any(p in address for p in parts) else address + ", " + cfg["geo"]
     # Photon first — reachable from cloud envs where Nominatim is blocked.
     try:
         url = (f"https://photon.komoot.io/api/?limit=1&lat={cfg['bias'][0]}&lon={cfg['bias'][1]}&q="
