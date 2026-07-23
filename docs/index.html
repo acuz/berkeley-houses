@@ -78,6 +78,8 @@
     .filter-chip { padding: 0.3rem 0.8rem; border-radius: 9999px; border: 1px solid var(--border); background: white; font-size: 0.8rem; font-weight: 500; cursor: pointer; color: var(--muted); transition: all 0.15s; font-family: inherit; display: inline-flex; align-items: center; gap: 0.35rem; }
     .filter-chip:hover { border-color: var(--primary); }
     .filter-chip.active { background: var(--primary); color: white; border-color: var(--primary); }
+    .filter-chip.archived-chip { margin-left: auto; color: #64748b; }
+    .filter-chip.archived-chip.active { background: #475569; color: white; border-color: #475569; }
     .filter-chip .count { font-size: 0.7rem; opacity: 0.8; }
     .sort-select { margin-left: auto; padding: 0.4rem 0.7rem; border: 1px solid var(--border); border-radius: 0.5rem; font-size: 0.82rem; font-family: inherit; background: white; }
 
@@ -415,10 +417,15 @@ const STATUSES = [
   { key:'toured',        label:'Toured',         color:'#0d9488' },
   { key:'applied',       label:'Applied',        color:'#ea580c' },
   { key:'accepted',      label:'Accepted',       color:'#16a34a' },
-  { key:'rejected',      label:'Rejected',       color:'#dc2626' },
-  { key:'dropped',       label:'Dropped',        color:'#64748b' },
+  // Terminal states — archived (hidden from the main view by default).
+  { key:'rejected',      label:'Rejected',       color:'#dc2626', archived:true },
+  { key:'dropped',       label:'Dropped',        color:'#64748b', archived:true },
+  { key:'gone',          label:'Gone',           color:'#525252', archived:true },
+  { key:'notInteresting',label:'Not interesting',color:'#a3a3a3', archived:true },
 ];
 const STATUS_MAP = Object.fromEntries(STATUSES.map(s => [s.key, s]));
+const ARCHIVED = new Set(STATUSES.filter(s => s.archived).map(s => s.key));
+function isArchived(h) { return ARCHIVED.has(h.status); }
 const INT_ICONS = { email:'📧', call:'📞', directMessage:'💬', videoTour:'🎥', inPerson:'🚶', questionAsked:'❓', other:'•' };
 const INT_LABELS = { email:'Email', call:'Call', directMessage:'Direct message', videoTour:'Video tour', inPerson:'In-person visit', questionAsked:'Question asked', other:'Other' };
 const EVENT_TYPES = {
@@ -580,16 +587,24 @@ async function loadHouses() {
 }
 
 function renderFilters() {
-  const counts = { all: houses.length };
+  const counts = {};
   STATUSES.forEach(s => counts[s.key] = houses.filter(h => h.status === s.key).length);
+  const activeCount = houses.filter(h => !isArchived(h)).length;
+  const archivedCount = houses.length - activeCount;
+  const inArchive = activeFilter === 'archived' || ARCHIVED.has(activeFilter);
   const wrap = $('status-filters');
-  const chips = [`<button class="filter-chip ${activeFilter==='all'?'active':''}" onclick="setFilter('all')">All <span class="count">${counts.all}</span></button>`];
-  STATUSES.forEach(s => {
-    if (!counts[s.key]) return; // hide empty statuses
-    chips.push(`<button class="filter-chip ${activeFilter===s.key?'active':''}" onclick="setFilter('${s.key}')">
-      <span style="width:8px;height:8px;border-radius:50%;background:${s.color};display:inline-block"></span>
-      ${s.label} <span class="count">${counts[s.key]}</span></button>`);
+  const chip = (f, label, count, color) =>
+    `<button class="filter-chip ${activeFilter===f?'active':''}" onclick="setFilter('${f}')">`
+    + (color ? `<span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block"></span> ` : '')
+    + `${label} <span class="count">${count}</span></button>`;
+
+  const chips = [chip('all', 'All', activeCount)];
+  // While viewing the archive, offer per-status archived chips; otherwise active statuses.
+  STATUSES.filter(s => !!s.archived === inArchive).forEach(s => {
+    if (counts[s.key]) chips.push(chip(s.key, s.label, counts[s.key], s.color));
   });
+  if (archivedCount) chips.push(
+    `<button class="filter-chip archived-chip ${inArchive?'active':''}" onclick="setFilter('archived')">🗄 Archived <span class="count">${archivedCount}</span></button>`);
   wrap.innerHTML = chips.join('');
 }
 
@@ -597,8 +612,17 @@ function setFilter(f) { activeFilter = f; renderFilters(); renderHouses(); }
 
 function renderHouses() {
   const grid = $('house-grid');
-  const list = activeFilter === 'all' ? houses : houses.filter(h => h.status === activeFilter);
-  $('list-empty').classList.toggle('hidden', houses.length > 0);
+  const list =
+      activeFilter === 'all'      ? houses.filter(h => !isArchived(h))
+    : activeFilter === 'archived' ? houses.filter(isArchived)
+    :                               houses.filter(h => h.status === activeFilter);
+  const empty = $('list-empty');
+  empty.classList.toggle('hidden', list.length > 0);
+  if (list.length === 0) {
+    empty.querySelector('p').innerHTML = houses.length === 0
+      ? 'No houses yet. Click <strong>+ Add house</strong> to start tracking.'
+      : (activeFilter === 'archived' ? 'No archived houses.' : 'Nothing matches this filter.');
+  }
   grid.innerHTML = list.map(h => {
     const st = STATUS_MAP[h.status] || STATUS_MAP.interested;
     const photo = h.photo
@@ -1127,7 +1151,7 @@ function renderMarkers() {
   if (!markerLayer) return;
   markerLayer.clearLayers();
   const pts = [];
-  houses.filter(h => h.lat != null && h.lng != null).forEach(h => {
+  houses.filter(h => h.lat != null && h.lng != null && !isArchived(h)).forEach(h => {
     const st = STATUS_MAP[h.status] || STATUS_MAP.interested;
     const icon = L.divIcon({ className: '', html: `<div class="map-pin" style="background:${st.color}"></div>`, iconSize: [22,22], iconAnchor: [11,22] });
     const m = L.marker([h.lat, h.lng], { icon }).addTo(markerLayer);

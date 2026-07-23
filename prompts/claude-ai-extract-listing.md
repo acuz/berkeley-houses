@@ -45,7 +45,8 @@ Keys and rules:
 - `pets` (string): one of OK / Cats only / No
 - `photo` (string): the main listing image URL (og:image)
 - `status` (string): one of interested, contacted, tourScheduled, toured,
-  applied, accepted, rejected, dropped — default "interested"
+  applied, accepted, rejected, dropped, gone, notInteresting — default "interested"
+  (rejected/dropped/gone/notInteresting are archived = hidden from the main view)
 - `pros` (string), `cons` (string), `notes` (string): notes = 1-2 sentence
   summary plus anything notable (fees, contact, open-house dates)
 
